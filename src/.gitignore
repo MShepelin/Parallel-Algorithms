@@ -1,2 +1,3 @@
 build/
 parallelrank.egg-info/
+dist/
