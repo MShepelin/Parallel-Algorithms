@@ -5,6 +5,7 @@ import platform
 import pathlib
 
 
+# rename using _ instead of camel case to mimic tensorflow
 def findRank(matrix): 
     if not isinstance(matrix, np.ndarray):
         printHelpAndExit("Error: matrix should be np.ndarray")
