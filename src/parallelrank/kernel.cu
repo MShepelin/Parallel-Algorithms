@@ -162,9 +162,45 @@ extern "C" int findRankRaw(float* matrix, size_t rows, size_t columns) {
 	return minSide - rankDecrease;
 }
 
-extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
+//__global__ void check_if_matrix_reduced(thrust::device_vector<bool>& rank_search_flags, ) {
+//
+//}
+
+__global__ void fill_column_sizes(int32_t* d_column_sizes, uint32_t d_column_sizes_len, int32_t* d_columns_offsets) {
+	// assumes d_columns_offsets has size of (d_column_sizes_len + 1)
+	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < d_column_sizes_len; i += gridDim.x * blockDim.x) {
+		d_column_sizes[i] = d_columns_offsets[i + 1] - d_columns_offsets[i];
+	}
+}
+
+struct CSRMatrix {
+public:
 	thrust::device_vector<int32_t> d_columns_offsets;
-	d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 	thrust::device_vector<int32_t> d_rows_indicies;
-	d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);	
+	thrust::device_vector<int32_t> d_column_sizes;
+
+public:
+	CSRMatrix() = default;
+
+	CSRMatrix(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns) {
+		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
+		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
+		d_column_sizes.assign(columns, 0);
+		fill_column_sizes<<<256, 256>>>(
+			thrust::raw_pointer_cast(d_column_sizes.data()), d_column_sizes.size(),
+			thrust::raw_pointer_cast(d_columns_offsets.data())); // TODO: fix grid size
+	}
+};
+
+extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
+	CSRMatrix buffer_1(column_offsets, column_offsets_len, rows_indicies, nnz, columns);
+	CSRMatrix buffer_2;
+
+	thrust::device_vector<bool> rank_search_flags(1, false);
+	// Structure of rank_search_flags:
+	// 0) is matrix reduced?
+
+	// Do while not reduced:
+	//while (!rank_search_flags[0]) { 
+	//}
 }
