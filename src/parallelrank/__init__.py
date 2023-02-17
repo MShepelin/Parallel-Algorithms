@@ -1,25 +1,26 @@
 import ctypes
-from .converter import convert, printHelpAndExit
+from .converter import printHelpAndExit # TODO: fix camel case
+from .globals import PROG
 import numpy as np
 import platform
 import pathlib
 
+__all__ = ['test_read_csr_rank']
 
-# rename using _ instead of camel case to mimic tensorflow
-def findRank(matrix): 
-    if not isinstance(matrix, np.ndarray):
-        printHelpAndExit("Error: matrix should be np.ndarray")
+def load_DLL():
+    global PROG
     
-    prog = None
-
-    path= str(pathlib.Path(__file__).parents[0].with_name('libparallel_rank.so'))
+    if PROG is not None:
+        return
+    
+    path = str(pathlib.Path(__file__).parents[0].with_name('libparallel_rank.so'))
     if platform.system() == 'Windows':
         path = str(pathlib.Path(__file__).parents[0].with_name('parallel_rank.dll'))
     if platform.system() == 'Darwin':
         path = str(pathlib.Path(__file__).parents[0].with_name('parallel_rank.dylib'))
 
     if path != None:
-        prog = ctypes.cdll.LoadLibrary(path)
+        PROG = ctypes.cdll.LoadLibrary(path)
     else:
         if platform.system() == "Windows":
             raise Exception("Could not locate parallel_rank.dll file, please check README.md for details.")
@@ -28,5 +29,23 @@ def findRank(matrix):
         else:
             raise Exception("Could not locate parallel_rank.so file, please check README.md for details.")
 
-    rank = convert(prog, matrix)
-    return rank
+
+def test_read_csr_rank(column_offsets, rows_indicies, rows, columns):
+    global PROG
+    
+    assert type(rows) == int and type(columns) == int
+    
+    if not isinstance(column_offsets, np.ndarray) or not isinstance(rows_indicies, np.ndarray):
+        printHelpAndExit("Error: matrix should be np.ndarray")
+        
+    if column_offsets.dtype != np.int32 or rows_indicies.dtype != np.int32:
+        printHelpAndExit("Error: matrix should be have dtype np.int32")
+        
+    if len(column_offsets.shape) != 1 or len(rows_indicies.shape) != 1:
+        printHelpAndExit("Error: column_offsets and rows_indicies should be 1D arrays")
+        
+    load_DLL()
+
+    c_column_offsets = (ctypes.c_int32 * len(column_offsets))(*column_offsets)
+    c_rows_indicies = (ctypes.c_int32 * len(rows_indicies))(*rows_indicies)
+    PROG.read_CSR_matrix(c_column_offsets, len(column_offsets), c_rows_indicies, len(rows_indicies), columns, rows)

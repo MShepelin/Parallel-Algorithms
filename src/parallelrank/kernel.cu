@@ -3,13 +3,14 @@
 #include <iostream>
 #include "CUDA-By-Example/common/book.h"
 #include "CUDA-By-Example/common/cpu_bitmap.h"
+#include <thrust/device_vector.h>
 
 #define GRID_DIM 1000
 
 __global__ void gaussStep(float* matrix, const size_t rows, const size_t columns, const size_t activeRowId, bool* foundRowToSwap) {
 	if (!(*foundRowToSwap)) {
 		return;
-	}
+	} 
 	
 	for (size_t currentRowId = blockIdx.x; currentRowId < rows; currentRowId += gridDim.x) {
 		if (currentRowId == activeRowId) {
@@ -159,4 +160,11 @@ extern "C" int findRankRaw(float* matrix, size_t rows, size_t columns) {
 	cudaFree(devFoundRowToSwap);
 	cudaFree(devRowToSwap);
 	return minSide - rankDecrease;
+}
+
+extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
+	thrust::device_vector<int32_t> d_columns_offsets;
+	d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
+	thrust::device_vector<int32_t> d_rows_indicies;
+	d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);	
 }

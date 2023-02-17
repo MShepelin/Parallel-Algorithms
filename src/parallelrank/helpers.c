@@ -1,16 +1,10 @@
 #include <stdlib.h>
+#include <stdint.h>
 
 extern int findRankRaw(float* matrix, size_t rows, size_t columns);
 
-// example for export in python
-int add(int a, int b) {
-	return a + b;
-}
+extern void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows);
 
-int findRank(float* matrix, size_t rows, size_t columns) {
-	if (matrix == NULL) {
-		return -1;
-	}
-
-	return findRankRaw(matrix, rows, columns);
+void read_CSR_matrix(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
+	read_CSR(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows);
 }

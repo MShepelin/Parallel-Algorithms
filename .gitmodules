@@ -1,6 +1,3 @@
-[submodule "src/parallelrank"]
-	path = src/parallelrank/CUDA-By-Example
-	url = https://github.com/jiekebo/CUDA-By-Example.git
 [submodule "src/parallelrank/CUDA-By-Example"]
 	path = src/parallelrank/CUDA-By-Example
 	url = https://github.com/jiekebo/CUDA-By-Example.git
