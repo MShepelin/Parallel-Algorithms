@@ -162,13 +162,37 @@ extern "C" int findRankRaw(float* matrix, size_t rows, size_t columns) {
 	return minSide - rankDecrease;
 }
 
-//__global__ void check_if_matrix_reduced(thrust::device_vector<bool>& rank_search_flags, ) {
-//
-//}
+#define RANK_SEARCH_FLAGS_SIZE 1
 
-__global__ void fill_column_sizes(int32_t* d_column_sizes, uint32_t d_column_sizes_len, int32_t* d_columns_offsets) {
-	// assumes d_columns_offsets has size of (d_column_sizes_len + 1)
-	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < d_column_sizes_len; i += gridDim.x * blockDim.x) {
+#define cudaCheckError(msg) {  \
+	cudaError_t __err = cudaGetLastError();  \
+	if(__err != cudaSuccess) {  \
+		fprintf(stderr, "Fatal error: %s (%s at %s:%d)\n", \
+					(msg), cudaGetErrorString(__err), \
+					__FILE__, __LINE__); \
+		fprintf(stderr, "*** FAILED - ABORTING\n"); \
+		exit(1); \
+	} \
+}
+
+__global__ void check_if_matrix_reduced_raw(
+	int32_t* rank_search_flags,
+	int32_t* d_column_sizes, 
+	uint32_t columns) {
+	// Check every pair of (i, j) where i and j are column indicies
+	size_t columns_pairs = columns * columns;
+	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns_pairs; i += gridDim.x * blockDim.x) {
+		size_t column_left = i % columns;
+		size_t column_right = i - column_left * columns;
+		if (d_column_sizes[column_left] == d_column_sizes[column_right]) {
+			atomicOr(rank_search_flags, 1);
+		}
+	}
+}
+
+__global__ void fill_column_sizes(int32_t* d_column_sizes, uint32_t columns, int32_t* d_columns_offsets) {
+	// Assumes d_columns_offsets has size of (columns + 1)
+	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns; i += gridDim.x * blockDim.x) {
 		d_column_sizes[i] = d_columns_offsets[i + 1] - d_columns_offsets[i];
 	}
 }
@@ -177,7 +201,9 @@ struct CSRMatrix {
 public:
 	thrust::device_vector<int32_t> d_columns_offsets;
 	thrust::device_vector<int32_t> d_rows_indicies;
-	thrust::device_vector<int32_t> d_column_sizes;
+	// Number of real elements in column,
+	// is <= (difference in d_columns_offsets neighbour elements)
+	thrust::device_vector<int32_t> d_column_sizes; 
 
 public:
 	CSRMatrix() = default;
@@ -190,17 +216,36 @@ public:
 			thrust::raw_pointer_cast(d_column_sizes.data()), d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data())); // TODO: fix grid size
 	}
+
+	void check_if_matrix_reduced(thrust::device_vector<int32_t>& rank_search_flags) {
+		check_if_matrix_reduced_raw<<<256, 256>>>( // TODO: fix grid size
+			thrust::raw_pointer_cast(rank_search_flags.data()),
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			d_column_sizes.size());
+	}
 };
 
 extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
 	CSRMatrix buffer_1(column_offsets, column_offsets_len, rows_indicies, nnz, columns);
 	CSRMatrix buffer_2;
+	bool is_first_buffer_garbage = false;
+	cudaCheckError("Buffer initialisation");
 
-	thrust::device_vector<bool> rank_search_flags(1, false);
+	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, false);
 	// Structure of rank_search_flags:
 	// 0) is matrix reduced?
 
 	// Do while not reduced:
-	//while (!rank_search_flags[0]) { 
+	//while (!rank_search_flags[0]) { // TODO: figure out a better way to check boolean
+		// Compute
+
+		if (is_first_buffer_garbage) {
+			buffer_2.check_if_matrix_reduced(rank_search_flags);
+		}
+		else {
+			buffer_1.check_if_matrix_reduced(rank_search_flags);
+		}
+
+		cudaCheckError("Matrix reduction check");
 	//}
 }
