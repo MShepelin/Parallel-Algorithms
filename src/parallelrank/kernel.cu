@@ -4,12 +4,14 @@
 #include "CUDA-By-Example/common/book.h"
 #include "CUDA-By-Example/common/cpu_bitmap.h"
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
 #define GRID_DIM 1000
 
 #define RANK_SEARCH_FLAGS_SIZE 1
 
 #define PAIRS_PER_ROUND 65536
+#define BLOCKS_FOR_PAIRS_SEARCH 256
 #define INVALID_PAIR_VALUE -1
 
 #define cudaCheckError(msg) {  \
@@ -23,12 +25,14 @@
 	} \
 }
 
-__global__ void find_subtraction_pairs_raw(int32_t* subtraction_pairs, int32_t* d_column_sizes, uint32_t columns) {
+__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* d_column_sizes, uint32_t columns) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	
 	// Each block has N threads
 	// Each thread works for a unique column and 
 	// checks all columns with lower indexes (starting from left)
+
+	// Assumes memory_calculation has size gridDim.x
 
 	__shared__ int32_t new_subtraction_id;
 
@@ -44,6 +48,7 @@ __global__ void find_subtraction_pairs_raw(int32_t* subtraction_pairs, int32_t* 
 	// TODO: may be make them static
 
 	for (size_t column_id = blockIdx.x * blockDim.x + threadIdx.x; column_id < columns; column_id += gridDim.x * blockDim.x) {
+		bool is_subtraction_found = false;
 		for (size_t left_column_id = 0; left_column_id < columns; ++left_column_id) {
 			if (d_column_sizes[column_id] == d_column_sizes[left_column_id]) {
 				int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
@@ -52,11 +57,19 @@ __global__ void find_subtraction_pairs_raw(int32_t* subtraction_pairs, int32_t* 
 					break;
 				}
 
+				is_subtraction_found = true;
+				nnz_estimation[column_id] = d_column_sizes[column_id] + d_column_sizes[left_column_id] - 2;
 				subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
 				subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = left_column_id;
 				// subtraction pair means columns[column_id] -= columns[left_column_id]
 				break;
 			}
+		}
+
+		if (!is_subtraction_found) {
+			// No atomic operations are needed because 
+			// each column_id is devoted to one thread
+			nnz_estimation[column_id] = d_column_sizes[column_id];
 		}
 	}
 }
@@ -92,7 +105,14 @@ public:
 	thrust::device_vector<int32_t> d_column_sizes; 
 
 public:
-	CSRMatrix() = default;
+	CSRMatrix() = delete;
+
+	CSRMatrix(int32_t columns) {
+		d_column_sizes.assign(columns, 0);
+		d_columns_offsets.assign(columns + 1, -1);
+		// We put invalid size value
+		// TODO: check that d_columns_offsets really has size (columns + 1)
+	}
 
 	CSRMatrix(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns) {
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
@@ -110,19 +130,41 @@ public:
 			d_column_sizes.size());
 	}
 
-	void find_subtraction_pairs(thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
-		find_subtraction_pairs_raw<<<256, 256>>>(
+	void find_subtraction_pairs(
+		thrust::device_vector<int32_t>& d_nnz_estimation,
+		thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
+		find_subtraction_pairs_raw<<<BLOCKS_FOR_PAIRS_SEARCH, 256>>>(
+			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size()
 		);
+	}
+
+	// TODO: add squash method to remove all garbage data in d_rows_indicies
+
+	//void prepare_memory(uint32_t nnz) {
+		// d_column_sizes
+	//}
+
+	void update_columns_offsets(thrust::device_vector<int32_t>& d_nnz_estimation) {
+		// TODO: figure out a better way to update columns offsets
+		thrust::host_vector<int32_t> nnz_estimation = d_nnz_estimation;
+		thrust::host_vector<int32_t> new_columns_offsets;
+		new_columns_offsets.assign(d_column_sizes.size() + 1, 0);
+
+		for (size_t i = 1; i < d_column_sizes.size() + 1; ++i) {
+			new_columns_offsets[i] = new_columns_offsets[i - 1] + nnz_estimation[i - 1];
+		}
+
+		d_columns_offsets = new_columns_offsets;
 	}
 };
 
 extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
 	CSRMatrix buffers[] = {
 		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns),
-		CSRMatrix()
+		CSRMatrix(columns)
 	};
 	uint32_t active_buffer_index = 0;
 
@@ -132,16 +174,26 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 	// 0) is matrix reduced?
 
 	thrust::device_vector<int32_t> d_pairs_for_subtractions(PAIRS_PER_ROUND * 2, -1);
+	thrust::device_vector<int32_t> d_nnz_estimation(columns, 0);
+
 	cudaCheckError("Buffer initialisation");
 
 	// Do while not reduced:
-	while (!rank_search_flags[0]) { // TODO: figure out a better way to check boolean
+	for (int32_t attempt = 0; (attempt < 1) && (!rank_search_flags[0]); ++attempt) {
+		// TODO: figure out a better way to check boolean
+		// TODO: define maimum attempts or take it from function arguements
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
-		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
-		buffers[active_buffer_index].find_subtraction_pairs(d_pairs_for_subtractions);
+		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions);
+		// TODO: check that values (from) don't repeat in pairs value
+		// TODO: check that all columns are set in d_nnz_estimation
+		buffers[active_buffer_index].update_columns_offsets(d_nnz_estimation);
+		// perform subtraction with merge
+		// ???
 
 		active_buffer_index = 1 - active_buffer_index;
+		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
 		cudaCheckError("Matrix reduction check");
-		break;
+
+		// [IMPORTANT] check that algorithm works when -1 can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
 }
