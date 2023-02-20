@@ -7,162 +7,10 @@
 
 #define GRID_DIM 1000
 
-__global__ void gaussStep(float* matrix, const size_t rows, const size_t columns, const size_t activeRowId, bool* foundRowToSwap) {
-	if (!(*foundRowToSwap)) {
-		return;
-	} 
-	
-	for (size_t currentRowId = blockIdx.x; currentRowId < rows; currentRowId += gridDim.x) {
-		if (currentRowId == activeRowId) {
-			continue;
-		}
-
-		float multiplier = matrix[currentRowId * columns + activeRowId] / matrix[activeRowId * columns + activeRowId];
-
-		// Subtract active row from current row
-		for (size_t currentRowElementId = activeRowId; currentRowElementId < columns; ++currentRowElementId) {
-			matrix[currentRowId * columns + currentRowElementId] -= multiplier * matrix[activeRowId * columns + currentRowElementId];
-		}
-	}
-}
-
-__global__ void swapRows(float* matrix, const size_t columns, const size_t activeRowId, const size_t* rowToSwap, bool* foundRowToSwap) {
-	if (!(*foundRowToSwap)) {
-		return;
-	}
-	for (size_t i = blockIdx.x; i < columns; i += gridDim.x) {
-		const float swappedElement = matrix[(*rowToSwap) * columns + i];
-		matrix[(*rowToSwap) * columns + i] = matrix[activeRowId * columns + i];
-		matrix[activeRowId * columns + i] = swappedElement;
-	}
-}
-
-__global__ void findRowToSwap(
-	float* matrix, 
-	const size_t rows,
-	const size_t columns,
-	const size_t activeRowId, 
-	size_t* rowToSwap,
-	size_t* rankDecrease,
-	bool* foundRowToSwap)
-{
-	*foundRowToSwap = false;
-	while (activeRowId + *rankDecrease < columns) {
-		size_t activeColumId = activeRowId + *rankDecrease;
-
-		// Scan the active column
-		// TODO: may be add reduction to avoid scanning a long column
-		for (size_t nonzeroRowElement = activeRowId; nonzeroRowElement < rows; ++nonzeroRowElement) {
-			if (matrix[nonzeroRowElement * columns + activeRowId] != 0) {
-				*foundRowToSwap = true;
-				*rowToSwap = activeRowId;
-				return;
-			}
-		}
-
-		// Didn't find row to swap
-		// Cannot do row subtraction
-		++(*rankDecrease);
-	}
-}
-
-float* inputMatrix(size_t* rows, size_t* columns) {
-	printf("Enter number of rows and columns:\n");
-	int readArguementsNum = scanf("%llu %llu", rows, columns);
-	if (readArguementsNum != 2 || (*rows) <= 0 || (*columns) <= 0) {
-		printf("Wrong rows and columns input\n");
-		return nullptr;
-	}
-
-	size_t matrixMallocSize = sizeof(float) * (*rows) * (*columns);
-	float* matrix = (float*) malloc(matrixMallocSize);
-	if (matrix == nullptr) {
-		printf("Matrix memory allocation error\n");
-		return nullptr;
-	}
-
-	for (size_t i = 0; i < (*rows); ++i) {
-		for (size_t j = 0; j < (*columns); ++j) {
-			readArguementsNum = scanf("%f", &matrix[(*columns) * i + j]);
-			if (readArguementsNum != 1) {
-				printf("Wrong input in matrix\n");
-				free(matrix);
-				return nullptr;
-			}
-		}
-	}
-
-	return matrix;
-}
-
-extern "C" int findRankRaw(float* matrix, size_t rows, size_t columns) {
-	// Assume that matrix is non-null and points to data of size rows*columns
-
-	size_t matrixMallocSize = sizeof(float) * rows * columns;
-	size_t minSide = min(rows, columns);
-	size_t rankDecrease = 0;
-
-	size_t* devRankDecrease = nullptr;
-	bool* devFoundRowToSwap = nullptr;
-	float* devMatrix = nullptr;
-	size_t* devRowToSwap = nullptr;
-	HANDLE_ERROR(cudaMalloc((void**)&devMatrix, matrixMallocSize));
-	HANDLE_ERROR(cudaMalloc((void**)&devRankDecrease, sizeof(size_t)));
-	HANDLE_ERROR(cudaMalloc((void**)&devFoundRowToSwap, sizeof(size_t)));
-	HANDLE_ERROR(cudaMalloc((void**)&devRowToSwap, sizeof(size_t)));
-	HANDLE_ERROR(cudaMemcpy(devMatrix,
-		matrix,
-		matrixMallocSize,
-		cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(devRankDecrease,
-		&rankDecrease,
-		sizeof(size_t),
-		cudaMemcpyHostToDevice));
-
-	for (size_t activeRowId = 0; activeRowId < minSide; ++activeRowId) {
-		// Find row with nonzero element on active column
-		findRowToSwap<<<1, 1>>>(
-			devMatrix, 
-			rows, 
-			columns, 
-			activeRowId,
-			devRowToSwap, 
-			devRankDecrease,
-			devFoundRowToSwap);
-		// Swap found row and active row
-		swapRows<<<min((size_t)GRID_DIM, columns), 1>>>(
-			devMatrix,
-			columns,
-			activeRowId,
-			devRowToSwap,
-			devFoundRowToSwap);
-		// Subtract active row from other rows
-		// TODO: parallelize gaussStep using grid
-		gaussStep<<<min((size_t)GRID_DIM, rows), 1>>>(
-			devMatrix, 
-			rows, 
-			columns, 
-			activeRowId, 
-			devFoundRowToSwap);
-	}
-	
-	HANDLE_ERROR(cudaMemcpy(matrix,
-		devMatrix,
-		matrixMallocSize,
-		cudaMemcpyDeviceToHost));
-	HANDLE_ERROR(cudaMemcpy(&rankDecrease,
-		devRankDecrease,
-		sizeof(size_t),
-		cudaMemcpyDeviceToHost));
-
-	cudaFree(devMatrix);
-	cudaFree(devRankDecrease);
-	cudaFree(devFoundRowToSwap);
-	cudaFree(devRowToSwap);
-	return minSide - rankDecrease;
-}
-
 #define RANK_SEARCH_FLAGS_SIZE 1
+
+#define PAIRS_PER_ROUND 65536
+#define INVALID_PAIR_VALUE -1
 
 #define cudaCheckError(msg) {  \
 	cudaError_t __err = cudaGetLastError();  \
@@ -173,6 +21,44 @@ extern "C" int findRankRaw(float* matrix, size_t rows, size_t columns) {
 		fprintf(stderr, "*** FAILED - ABORTING\n"); \
 		exit(1); \
 	} \
+}
+
+__global__ void find_subtraction_pairs_raw(int32_t* subtraction_pairs, int32_t* d_column_sizes, uint32_t columns) {
+	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
+	
+	// Each block has N threads
+	// Each thread works for a unique column and 
+	// checks all columns with lower indexes (starting from left)
+
+	__shared__ int32_t new_subtraction_id;
+
+	if (threadIdx.x == 0) {
+		new_subtraction_id = 0;
+	}
+
+	__syncthreads();
+	
+	uint32_t max_subtractions = PAIRS_PER_ROUND / gridDim.x;
+	uint32_t offset = blockIdx.x * max_subtractions;
+	// TODO: add assertion that PAIRS_PER_ROUND % gridDim.x == 0
+	// TODO: may be make them static
+
+	for (size_t column_id = blockIdx.x * blockDim.x + threadIdx.x; column_id < columns; column_id += gridDim.x * blockDim.x) {
+		for (size_t left_column_id = 0; left_column_id < columns; ++left_column_id) {
+			if (d_column_sizes[column_id] == d_column_sizes[left_column_id]) {
+				int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
+				if (old_new_subtraction_id >= max_subtractions) {
+					// Block batch is full
+					break;
+				}
+
+				subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
+				subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = left_column_id;
+				// subtraction pair means columns[column_id] -= columns[left_column_id]
+				break;
+			}
+		}
+	}
 }
 
 __global__ void check_if_matrix_reduced_raw(
@@ -223,29 +109,39 @@ public:
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size());
 	}
+
+	void find_subtraction_pairs(thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
+		find_subtraction_pairs_raw<<<256, 256>>>(
+			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			d_column_sizes.size()
+		);
+	}
 };
 
 extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
-	CSRMatrix buffer_1(column_offsets, column_offsets_len, rows_indicies, nnz, columns);
-	CSRMatrix buffer_2;
-	bool is_first_buffer_garbage = false;
-	cudaCheckError("Buffer initialisation");
+	CSRMatrix buffers[] = {
+		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns),
+		CSRMatrix()
+	};
+	uint32_t active_buffer_index = 0;
 
+	
 	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, false);
 	// Structure of rank_search_flags:
 	// 0) is matrix reduced?
 
+	thrust::device_vector<int32_t> d_pairs_for_subtractions(PAIRS_PER_ROUND * 2, -1);
+	cudaCheckError("Buffer initialisation");
+
 	// Do while not reduced:
-	//while (!rank_search_flags[0]) { // TODO: figure out a better way to check boolean
-		// Compute
+	while (!rank_search_flags[0]) { // TODO: figure out a better way to check boolean
+		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
+		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
+		buffers[active_buffer_index].find_subtraction_pairs(d_pairs_for_subtractions);
 
-		if (is_first_buffer_garbage) {
-			buffer_2.check_if_matrix_reduced(rank_search_flags);
-		}
-		else {
-			buffer_1.check_if_matrix_reduced(rank_search_flags);
-		}
-
+		active_buffer_index = 1 - active_buffer_index;
 		cudaCheckError("Matrix reduction check");
-	//}
+		break;
+	}
 }
