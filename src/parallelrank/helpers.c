@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-extern void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows);
+extern int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns, const int32_t rows, const int32_t max_attempts);
 
-void read_CSR_matrix(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
-	read_CSR(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows);
+int32_t find_rank(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns, const int32_t rows, const int32_t max_attempts) {
+	find_rank_raw(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows, max_attempts);
 }

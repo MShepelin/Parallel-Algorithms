@@ -5,7 +5,7 @@ import numpy as np
 import platform
 import pathlib
 
-__all__ = ['test_read_csr_rank']
+__all__ = ['find_rank']
 
 def load_DLL():
     global PROG
@@ -30,7 +30,11 @@ def load_DLL():
             raise Exception("Could not locate parallel_rank.so file, please check README.md for details.")
 
 
-def test_read_csr_rank(column_offsets, rows_indicies, rows, columns):
+def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None):
+    if max_attempts is None:
+        max_attempts = min(rows, columns)
+    
+    # Recommended max_attempts = columns
     global PROG
     
     assert type(rows) == int and type(columns) == int
@@ -48,4 +52,5 @@ def test_read_csr_rank(column_offsets, rows_indicies, rows, columns):
 
     c_column_offsets = (ctypes.c_int32 * len(column_offsets))(*column_offsets)
     c_rows_indicies = (ctypes.c_int32 * len(rows_indicies))(*rows_indicies)
-    PROG.read_CSR_matrix(c_column_offsets, len(column_offsets), c_rows_indicies, len(rows_indicies), columns, rows)
+    PROG.find_rank.restype = ctypes.c_int32
+    return PROG.find_rank(c_column_offsets, len(column_offsets), c_rows_indicies, len(rows_indicies), columns, rows, max_attempts)

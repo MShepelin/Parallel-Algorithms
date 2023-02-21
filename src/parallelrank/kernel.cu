@@ -5,6 +5,8 @@
 #include "CUDA-By-Example/common/cpu_bitmap.h"
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/execution_policy.h>
 #include <stdint.h>
 
 #define GRID_DIM 1000
@@ -25,6 +27,15 @@
 		exit(1); \
 	} \
 }
+
+template<typename T>
+struct is_positive : public thrust::unary_function<T, T>
+{
+	__host__ __device__ T operator()(const T& x) const
+	{
+		return x > T(0) ? 1 : 0;
+	}
+};
 
 // TODO: change type in subtraction_pairs for uint32_t
 __global__ void perform_subtractions(
@@ -160,14 +171,14 @@ public:
 public:
 	CSRMatrix() = delete;
 
-	CSRMatrix(int32_t columns) {
+	CSRMatrix(const int32_t columns) {
 		d_column_sizes.assign(columns, 0);
 		d_columns_offsets.assign(columns + 1, -1);
 		// We put invalid size value
 		// TODO: check that d_columns_offsets really has size (columns + 1)
 	}
 
-	CSRMatrix(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns) {
+	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns) {
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
 		d_column_sizes.assign(columns, 0);
@@ -223,9 +234,17 @@ public:
 		d_rows_indicies.assign(new_columns_offsets[d_column_sizes.size()], -1);
 		d_column_sizes.assign(d_column_sizes.size(), 0);
 	}
+
+	int32_t find_rank() {
+		// If matrix is not fully reduced, the result may be incorrect
+		return thrust::transform_reduce(d_column_sizes.begin(), d_column_sizes.end(),
+			is_positive<int32_t>(),
+			0,
+			thrust::plus<int32_t>());
+	}
 };
 
-extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, int32_t* rows_indicies, uint32_t nnz, int32_t columns, int32_t rows) {
+extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns, const int32_t rows, const int32_t max_attempts) {
 	CSRMatrix buffers[] = {
 		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns),
 		CSRMatrix(columns)
@@ -233,6 +252,7 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 	uint32_t active_buffer_index = 0;
 	
 	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, false);
+	thrust::device_vector<int32_t> rank(1, min(rows, columns));
 	// Structure of rank_search_flags:
 	// 0) is matrix reduced?
 
@@ -242,7 +262,7 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 	cudaCheckError("Buffer initialisation");
 
 	// Do while not reduced:
-	for (int32_t attempt = 0; (attempt < 1) && (!rank_search_flags[0]); ++attempt) {
+	for (int32_t attempt = 0; (attempt < max_attempts) && (!rank_search_flags[0]); ++attempt) {
 		// TODO: figure out a better way to check boolean
 		// TODO: define maimum attempts or take it from function arguements
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
@@ -259,4 +279,6 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 
 		// [IMPORTANT] check that algorithm works when -1 can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
+
+	return buffers[active_buffer_index].find_rank();
 }
