@@ -5,6 +5,7 @@
 #include "CUDA-By-Example/common/cpu_bitmap.h"
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <stdint.h>
 
 #define GRID_DIM 1000
 
@@ -25,7 +26,56 @@
 	} \
 }
 
-__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* d_column_sizes, uint32_t columns) {
+// TODO: change type in subtraction_pairs for uint32_t
+__global__ void perform_subtractions(
+	const int32_t* subtraction_pairs,
+	const int32_t* input_columns_offsets,
+	const int32_t* input_column_sizes,
+	const int32_t* input_rows_indicies,
+	const int32_t* output_columns_offsets,
+	int32_t* output_column_sizes,
+	int32_t* output_rows_indicies) {
+	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
+	for (int32_t pair_id = blockIdx.x * blockDim.x + threadIdx.x; pair_id < PAIRS_PER_ROUND; pair_id += gridDim.x * blockDim.x) {
+		int32_t column_from = subtraction_pairs[pair_id * 2];
+		int32_t column_subtraction = subtraction_pairs[pair_id * 2 + 1];
+
+		uint32_t id_to_put = output_columns_offsets[column_from];
+		uint32_t left_column_id = input_columns_offsets[column_from];
+		const uint32_t left_column_id_limit = left_column_id + input_column_sizes[column_from];
+		uint32_t right_column_id = input_columns_offsets[column_subtraction];
+		const uint32_t right_column_id_limit = right_column_id + input_column_sizes[column_subtraction];
+
+		while (left_column_id < left_column_id_limit ||
+			right_column_id < right_column_id_limit) {
+			
+			uint32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : UINT32_MAX;
+			uint32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : UINT32_MAX;
+
+			if (left_low == right_low) {
+				++left_column_id;
+				++right_column_id;
+				// 1 ^ 1 = 0
+			}
+			else if (left_low < right_low) {
+				output_rows_indicies[id_to_put] = left_low;
+				++output_column_sizes[column_from];
+				++id_to_put;
+				++left_column_id;
+				// 1 ^ 0 = 1
+			}
+			else if (right_low < left_low) {
+				output_rows_indicies[id_to_put] = right_low;
+				++output_column_sizes[column_from];
+				++id_to_put;
+				++right_column_id;
+				// 0 ^ 1 = 1
+			}
+		}
+	}
+}
+
+__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* column_sizes, uint32_t columns) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	
 	// Each block has N threads
@@ -49,50 +99,53 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 
 	for (size_t column_id = blockIdx.x * blockDim.x + threadIdx.x; column_id < columns; column_id += gridDim.x * blockDim.x) {
 		bool is_subtraction_found = false;
-		for (size_t left_column_id = 0; left_column_id < columns; ++left_column_id) {
-			if (d_column_sizes[column_id] == d_column_sizes[left_column_id]) {
-				int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
-				if (old_new_subtraction_id >= max_subtractions) {
-					// Block batch is full
+
+		if (column_sizes[column_id] > 0) {
+			for (size_t left_column_id = 0; left_column_id < column_id; ++left_column_id) {
+				if (column_sizes[column_id] == column_sizes[left_column_id]) {
+					int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
+					if (old_new_subtraction_id >= max_subtractions) {
+						// Block batch is full
+						break;
+					}
+
+					is_subtraction_found = true;
+					nnz_estimation[column_id] = column_sizes[column_id] + column_sizes[left_column_id] - 2;
+					subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
+					subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = left_column_id;
+					// subtraction pair means columns[column_id] -= columns[left_column_id]
 					break;
 				}
-
-				is_subtraction_found = true;
-				nnz_estimation[column_id] = d_column_sizes[column_id] + d_column_sizes[left_column_id] - 2;
-				subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
-				subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = left_column_id;
-				// subtraction pair means columns[column_id] -= columns[left_column_id]
-				break;
 			}
 		}
 
 		if (!is_subtraction_found) {
 			// No atomic operations are needed because 
 			// each column_id is devoted to one thread
-			nnz_estimation[column_id] = d_column_sizes[column_id];
+			nnz_estimation[column_id] = column_sizes[column_id];
 		}
 	}
 }
 
 __global__ void check_if_matrix_reduced_raw(
 	int32_t* rank_search_flags,
-	int32_t* d_column_sizes, 
+	int32_t* column_sizes, 
 	uint32_t columns) {
 	// Check every pair of (i, j) where i and j are column indicies
 	size_t columns_pairs = columns * columns;
 	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns_pairs; i += gridDim.x * blockDim.x) {
 		size_t column_left = i % columns;
 		size_t column_right = i - column_left * columns;
-		if (d_column_sizes[column_left] == d_column_sizes[column_right]) {
+		if (column_sizes[column_left] == column_sizes[column_right]) {
 			atomicOr(rank_search_flags, 1);
 		}
 	}
 }
 
-__global__ void fill_column_sizes(int32_t* d_column_sizes, uint32_t columns, int32_t* d_columns_offsets) {
-	// Assumes d_columns_offsets has size of (columns + 1)
+__global__ void fill_column_sizes(int32_t* column_sizes, uint32_t columns, int32_t* columns_offsets) {
+	// Assumes columns_offsets has size of (columns + 1)
 	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns; i += gridDim.x * blockDim.x) {
-		d_column_sizes[i] = d_columns_offsets[i + 1] - d_columns_offsets[i];
+		column_sizes[i] = columns_offsets[i + 1] - columns_offsets[i];
 	}
 }
 
@@ -143,9 +196,18 @@ public:
 
 	// TODO: add squash method to remove all garbage data in d_rows_indicies
 
-	//void prepare_memory(uint32_t nnz) {
-		// d_column_sizes
-	//}
+	void perform_subtraction(CSRMatrix& output, const thrust::device_vector<int32_t>& d_pairs_for_subtractions) const {
+		perform_subtractions<<<256, 256>>>(
+			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data()),
+
+			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
+			thrust::raw_pointer_cast(output.d_column_sizes.data()),
+			thrust::raw_pointer_cast(output.d_rows_indicies.data())
+		);
+	}
 
 	void update_columns_offsets(thrust::device_vector<int32_t>& d_nnz_estimation) {
 		// TODO: figure out a better way to update columns offsets
@@ -158,6 +220,8 @@ public:
 		}
 
 		d_columns_offsets = new_columns_offsets;
+		d_rows_indicies.assign(new_columns_offsets[d_column_sizes.size()], -1);
+		d_column_sizes.assign(d_column_sizes.size(), 0);
 	}
 };
 
@@ -167,7 +231,6 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 		CSRMatrix(columns)
 	};
 	uint32_t active_buffer_index = 0;
-
 	
 	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, false);
 	// Structure of rank_search_flags:
@@ -186,9 +249,9 @@ extern "C" void read_CSR(int32_t* column_offsets, uint32_t column_offsets_len, i
 		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions);
 		// TODO: check that values (from) don't repeat in pairs value
 		// TODO: check that all columns are set in d_nnz_estimation
-		buffers[active_buffer_index].update_columns_offsets(d_nnz_estimation);
+		buffers[1 - active_buffer_index].update_columns_offsets(d_nnz_estimation);
 		// perform subtraction with merge
-		// ???
+		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions);
 
 		active_buffer_index = 1 - active_buffer_index;
 		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
