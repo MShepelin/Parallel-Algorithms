@@ -129,7 +129,7 @@ __global__ void move_fixed_columns_raw(
 	}
 }
 
-__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* column_sizes, uint32_t columns) {
+__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* column_sizes, int32_t columns, const int32_t* columns_offset, const int32_t* rows_indices) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	
 	// Each block has N threads
@@ -156,7 +156,7 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 
 		if (column_sizes[column_id] > 0) {
 			for (size_t left_column_id = 0; left_column_id < column_id; ++left_column_id) {
-				if (column_sizes[column_id] == column_sizes[left_column_id]) {
+				if (rows_indices[columns_offset[column_id] + column_sizes[column_id] - 1] == rows_indices[columns_offset[left_column_id] + column_sizes[left_column_id] - 1]) {
 					int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
 					if (old_new_subtraction_id >= max_subtractions) {
 						// Block batch is full
@@ -211,7 +211,8 @@ __global__ void fill_column_sizes(int32_t* column_sizes, uint32_t columns, const
 }
 
 struct CSRMatrix {
-public:
+private:
+	int32_t rows;
 	thrust::device_vector<int32_t> d_columns_offsets;
 	thrust::device_vector<int32_t> d_rows_indicies;
 	// Number of real elements in column,
@@ -221,20 +222,22 @@ public:
 public:
 	CSRMatrix() = delete;
 
-	CSRMatrix(const int32_t columns) {
-		d_column_sizes.assign(columns, 0);
-		d_columns_offsets.assign(columns + 1, -1);
+	CSRMatrix(const int32_t in_columns, const int32_t in_rows) {
+		d_column_sizes.assign(in_columns, 0);
+		d_columns_offsets.assign(in_columns + 1, -1);
 		// We put invalid size value
 		// TODO: check that d_columns_offsets really has size (columns + 1)
+		rows = in_rows;
 	}
 
-	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns) {
+	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t in_columns, const int32_t in_rows) {
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
-		d_column_sizes.assign(columns, 0);
+		d_column_sizes.assign(in_columns, 0);
 		fill_column_sizes<<<1024, 256>>>(
 			thrust::raw_pointer_cast(d_column_sizes.data()), d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data())); // TODO: fix grid size
+		rows = in_rows;
 	}
 
 	void check_if_matrix_reduced(thrust::device_vector<int32_t>& rank_search_flags) {
@@ -251,7 +254,9 @@ public:
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
-			d_column_sizes.size()
+			d_column_sizes.size(),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data())
 		);
 	}
 
@@ -328,8 +333,8 @@ public:
 
 extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns, const int32_t rows, const int32_t max_attempts) {
 	CSRMatrix buffers[] = {
-		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns),
-		CSRMatrix(columns)
+		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows),
+		CSRMatrix(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
 	//buffers[active_buffer_index].print();
