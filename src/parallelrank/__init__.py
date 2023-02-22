@@ -33,6 +33,8 @@ def load_DLL():
 def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None):
     if max_attempts is None:
         max_attempts = min(rows, columns)
+
+    # TODO: compare len(column_offsets) and (columns + 1)
     
     # Recommended max_attempts = columns
     global PROG

@@ -1,11 +1,13 @@
 from scipy.sparse import rand
 import numpy as np
-
-matrix = rand(10, 100, density=0.2, format='csr', dtype=np.int8)
-matrix.data[:] = 1
-
+import tensorflow as tf
 from parallelrank import find_rank
 
-rank = find_rank(matrix.indices, matrix.indptr, matrix.shape[0], matrix.shape[1])
+matrix = rand(100, 100, density=0.2, format='csr', dtype=np.int8)
+matrix.data[:] = 1
 
-print("Found rank", rank)
+rank_custom = find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0])
+
+rank = tf.linalg.matrix_rank(matrix.todense(), tol=1e-10).numpy()
+print("Rank by tensorflow", rank)
+print("Rank by custom algorithm", rank_custom)
