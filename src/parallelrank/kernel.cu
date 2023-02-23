@@ -13,7 +13,7 @@
 
 #define RANK_SEARCH_FLAGS_SIZE 1
 
-#define PAIRS_PER_ROUND 1024
+#define PAIRS_PER_ROUND 65536
 #define BLOCKS_FOR_PAIRS_SEARCH 256
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
@@ -110,16 +110,12 @@ __global__ void move_fixed_columns_raw(
 			continue;
 		}
 
-		// Assumes input_column_sizes[column_id] == output_column_sizes
 		const uint32_t output_row_id = output_columns_offsets[column_id];
 		const uint32_t input_row_id = input_columns_offsets[column_id];
-
 		// TODO: remove
-		//if (output_column_sizes[column_id] != input_column_sizes[column_id]) {
-			//printf("Error occured comparing output_column_sizes[column_id]=%d, input_column_sizes[column_id]=%d\n", output_column_sizes[column_id], input_column_sizes[column_id]);
-			//printf("output_columns_offsets[column_id]=%d, output_columns_offsets[column_id + 1]=%d\n	", output_columns_offsets[column_id], output_columns_offsets[column_id + 1]);
-			//continue;
-		//}
+		if (output_columns_offsets[column_id + 1] - output_row_id < input_column_sizes[column_id]) {
+			printf("ALERT!!!");
+		}
 
 		for (uint32_t id_delta = 0; id_delta < input_column_sizes[column_id]; ++id_delta) {
 			output_rows_indicies[output_row_id + id_delta] = input_rows_indicies[input_row_id + id_delta];
@@ -156,12 +152,17 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 
 		if (column_sizes[column_id] > 0) {
 			for (size_t left_column_id = 0; left_column_id < column_id; ++left_column_id) {
+				if (column_sizes[left_column_id] <= 0) {
+					continue;
+				}
 				if (rows_indices[columns_offset[column_id] + column_sizes[column_id] - 1] == rows_indices[columns_offset[left_column_id] + column_sizes[left_column_id] - 1]) {
 					int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
 					if (old_new_subtraction_id >= max_subtractions) {
 						// Block batch is full
 						break;
 					}
+
+					//printf("Found subs pair %d and %d\n", column_id, left_column_id);
 
 					is_subtraction_found = true;
 					nnz_estimation[column_id] = column_sizes[column_id] + column_sizes[left_column_id] - 2;
@@ -184,15 +185,19 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 __global__ void check_if_matrix_reduced_raw(
 	int32_t* rank_search_flags,
 	int32_t* column_sizes, 
-	uint32_t columns) {
+	uint32_t columns,
+	const int32_t* column_offsets,
+	const int32_t* rows_indices) {
 	// Check every pair of (i, j) where i and j are column indicies
 	size_t columns_pairs = columns * columns;
 	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns_pairs; i += gridDim.x * blockDim.x) {
-		size_t column_left = i % columns;
+		size_t column_left = i / columns;
 		size_t column_right = i - column_left * columns;
 
-		if (column_sizes[column_left] > 0 && column_sizes[column_left] == column_sizes[column_right]) {
+		if (column_sizes[column_left] > 0 && column_sizes[column_right] > 0 && column_left < column_right &&
+			rows_indices[column_offsets[column_left] + column_sizes[column_left] - 1] == rows_indices[column_offsets[column_right] + column_sizes[column_right] - 1]) {
 			// Matrix is not reduced
+			//printf("Matrix is not reduced, columns %d and %d can be merged\n", column_left, column_right);
 			atomicAnd(&rank_search_flags[0], 0);
 		}
 	}
@@ -244,7 +249,10 @@ public:
 		check_if_matrix_reduced_raw<<<256, 256>>>( // TODO: fix grid size
 			thrust::raw_pointer_cast(rank_search_flags.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
-			d_column_sizes.size());
+			d_column_sizes.size(),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data())
+		);
 	}
 
 	void find_subtraction_pairs(
@@ -337,7 +345,7 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		CSRMatrix(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
-	//buffers[active_buffer_index].print();
+	buffers[active_buffer_index].print();
 	
 	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, 0);
 	// Structure of rank_search_flags:
@@ -354,6 +362,7 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		// TODO: define maimum attempts or take it from function arguements
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
 		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions);
+		printf("\n");
 		// TODO: check that values (from) don't repeat in pairs value
 		// TODO: check that all columns are set in d_nnz_estimation
 		buffers[1 - active_buffer_index].update_columns_offsets(d_nnz_estimation, buffers[active_buffer_index]);
@@ -367,9 +376,11 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
 		cudaCheckError("Matrix reduction check");
 
+		std::flush(std::cout);
+
 		// TODO: remove
-		// std::cout << "Attempt " << attempt << ", rank " << buffers[active_buffer_index].find_rank() << "\n";
-		//buffers[active_buffer_index].print();
+		std::cout << "Attempt " << attempt << ", rank " << buffers[active_buffer_index].find_rank() << "\n";
+		buffers[active_buffer_index].print();
 
 		// [IMPORTANT] check that algorithm works when -1 can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
