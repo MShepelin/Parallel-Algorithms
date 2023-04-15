@@ -345,7 +345,9 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		CSRMatrix(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
+#ifdef DEBUG_PRINT
 	buffers[active_buffer_index].print();
+#endif
 	
 	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, 0);
 	// Structure of rank_search_flags:
@@ -376,12 +378,11 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
 		cudaCheckError("Matrix reduction check");
 
+#ifdef DEBUG_PRINT
 		std::flush(std::cout);
-
-		// TODO: remove
 		std::cout << "Attempt " << attempt << ", rank " << buffers[active_buffer_index].find_rank() << "\n";
 		buffers[active_buffer_index].print();
-
+#endif
 		// [IMPORTANT] check that algorithm works when -1 can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
 
