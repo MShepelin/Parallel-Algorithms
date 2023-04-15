@@ -17,6 +17,7 @@
 #define BLOCKS_FOR_PAIRS_SEARCH 256
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
+#define INVALID_VALUE -1
 
 #define cudaCheckError(msg) {  \
 	cudaError_t __err = cudaGetLastError();  \
@@ -68,10 +69,11 @@ __global__ void perform_subtractions(
 			int32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
 			int32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
 
-			// TODO: remove
-			if (left_low == -1 || right_low == -1) {
+#ifdef DEBUG_PRINT
+			if (left_low == INVALID_VALUE || right_low == INVALID_VALUE) {
 				printf("Error occured\n");
 			}
+#endif
 
 			if (left_low == right_low) {
 				++left_column_id;
@@ -112,10 +114,11 @@ __global__ void move_fixed_columns_raw(
 
 		const uint32_t output_row_id = output_columns_offsets[column_id];
 		const uint32_t input_row_id = input_columns_offsets[column_id];
-		// TODO: remove
+#ifdef DEBUG_PRINT
 		if (output_columns_offsets[column_id + 1] - output_row_id < input_column_sizes[column_id]) {
 			printf("ALERT!!!");
 		}
+#endif
 
 		for (uint32_t id_delta = 0; id_delta < input_column_sizes[column_id]; ++id_delta) {
 			output_rows_indicies[output_row_id + id_delta] = input_rows_indicies[input_row_id + id_delta];
@@ -162,8 +165,6 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 						break;
 					}
 
-					//printf("Found subs pair %d and %d\n", column_id, left_column_id);
-
 					is_subtraction_found = true;
 					nnz_estimation[column_id] = column_sizes[column_id] + column_sizes[left_column_id] - 2;
 					subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
@@ -203,15 +204,26 @@ __global__ void check_if_matrix_reduced_raw(
 	}
 }
 
-__global__ void fill_column_sizes(int32_t* column_sizes, uint32_t columns, const int32_t* columns_offsets) {
+__global__ void fill_column_sizes(int32_t* column_sizes, uint32_t columns, const int32_t* columns_offsets, int32_t* max_row_indexes, const int32_t* rows_indicies) {
 	// Assumes columns_offsets has size of (columns + 1)
+	// Assumes rows_indicies doesn't have fake values
 	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns; i += gridDim.x * blockDim.x) {
-		column_sizes[i] = columns_offsets[i + 1] - columns_offsets[i];
+		const size_t next_column_offset = columns_offsets[i + 1];
+		const size_t column_size = next_column_offset - columns_offsets[i];
+		column_sizes[i] = column_size;
+		if (column_size > 0 && next_column_offset >= 1) {
+			max_row_indexes[i] = rows_indicies[next_column_offset - 1];
+		}
+		else {
+			max_row_indexes[i] = INVALID_VALUE;
+		}
+#ifdef DEBUG_PRINT
 		if (column_sizes[i] < 0) {
 			printf("Initialised column_sizes with error\n");
 			printf("i=%d\n", i);
 			printf("columns_offsets[i + 1]=%d, columns_offsets[i]=%d", columns_offsets[i + 1], columns_offsets[i]);
 		}
+#endif
 	}
 }
 
@@ -223,25 +235,34 @@ private:
 	// Number of real elements in column,
 	// is <= (difference in d_columns_offsets neighbour elements)
 	thrust::device_vector<int32_t> d_column_sizes; 
+	thrust::device_vector<int32_t> d_max_row_indexes;
 
 public:
 	CSRMatrix() = delete;
 
 	CSRMatrix(const int32_t in_columns, const int32_t in_rows) {
 		d_column_sizes.assign(in_columns, 0);
-		d_columns_offsets.assign(in_columns + 1, -1);
-		// We put invalid size value
+		d_max_row_indexes.assign(in_columns, 0);
+		// We put invalid size values in d_columns_offsets
+		d_columns_offsets.assign(in_columns + 1, INVALID_VALUE);
+		// d_rows_indicies stays empty
+		
 		// TODO: check that d_columns_offsets really has size (columns + 1)
 		rows = in_rows;
 	}
 
 	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t in_columns, const int32_t in_rows) {
+		d_column_sizes.assign(in_columns, 0);
+		d_max_row_indexes.assign(in_columns, 0);
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
-		d_column_sizes.assign(in_columns, 0);
 		fill_column_sizes<<<1024, 256>>>(
-			thrust::raw_pointer_cast(d_column_sizes.data()), d_column_sizes.size(),
-			thrust::raw_pointer_cast(d_columns_offsets.data())); // TODO: fix grid size
+			thrust::raw_pointer_cast(d_column_sizes.data()), 
+			d_column_sizes.size(),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data())
+		);
 		rows = in_rows;
 	}
 
@@ -297,7 +318,7 @@ public:
 		}
 
 		d_columns_offsets = new_columns_offsets;
-		d_rows_indicies.assign(new_columns_offsets[d_column_sizes.size()], -1);
+		d_rows_indicies.assign(new_columns_offsets[d_column_sizes.size()], INVALID_VALUE);
 		d_column_sizes.assign(d_column_sizes.size(), 0);
 	}
 
@@ -383,7 +404,7 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		std::cout << "Attempt " << attempt << ", rank " << buffers[active_buffer_index].find_rank() << "\n";
 		buffers[active_buffer_index].print();
 #endif
-		// [IMPORTANT] check that algorithm works when -1 can be found in rows_indicies (extra memory space) and column_size (empty columns)
+		// [IMPORTANT] check that algorithm works when INVALID_VALUE can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
 
 	return buffers[active_buffer_index].find_rank();
