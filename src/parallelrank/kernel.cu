@@ -14,7 +14,8 @@
 #define RANK_SEARCH_FLAGS_SIZE 1
 
 #define PAIRS_PER_ROUND 65536
-#define BLOCKS_FOR_PAIRS_SEARCH 256
+#define BLOCKS 65536
+#define THREADS 256
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
 #define INVALID_VALUE -1
@@ -139,7 +140,46 @@ __global__ void move_fixed_columns_raw(
 	}
 }
 
-__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, int32_t* column_sizes, int32_t columns, const int32_t* columns_offset, const int32_t* rows_indices, const int32_t* max_row_indexes) {
+__global__ void find_pivots(const int32_t* max_row_indexes, const int32_t* column_sizes, int32_t* max_row_to_pivot, const int32_t rows, const int32_t columns) {
+	__shared__ int32_t pivots[THREADS];
+	__shared__ int32_t nnz[THREADS];
+	pivots[threadIdx.x] = INVALID_VALUE;
+	nnz[threadIdx.x] = INVALID_VALUE;
+
+	for (int32_t max_row_index = blockIdx.x; max_row_index < rows; max_row_index += gridDim.x) {
+		for (size_t column_id = threadIdx.x; column_id < columns; column_id += gridDim.x) {
+			if (max_row_indexes[column_id] != max_row_index) {
+				continue;
+			}
+
+			if (nnz[threadIdx.x] == INVALID_VALUE || column_sizes[column_id] < nnz[threadIdx.x]) {
+				nnz[threadIdx.x] = column_sizes[column_id];
+				pivots[threadIdx.x] = column_id;
+			}
+		}
+
+		__syncthreads();
+		if (threadIdx.x == 0) {
+			int32_t best_pivot = INVALID_VALUE;
+			int32_t best_nnz = INVALID_VALUE;
+
+			for (size_t i = 0; i < THREADS; ++i) {
+				if (nnz[threadIdx.x] == INVALID_VALUE) {
+					continue;
+				}
+
+				if (best_nnz == INVALID_VALUE || nnz[threadIdx.x] < best_nnz) {
+					best_nnz = nnz[threadIdx.x];
+					best_pivot = pivots[threadIdx.x];
+				}
+			}
+
+			max_row_to_pivot[max_row_index] = best_pivot;
+		}
+	}
+}
+
+__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, const int32_t* column_sizes, int32_t columns, const int32_t* columns_offset, const int32_t* rows_indices, const int32_t* max_row_indexes) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	
 	// Each block has N threads
@@ -169,7 +209,7 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 				if (column_sizes[left_column_id] <= 0) {
 					continue;
 				}
-				if (max_row_indexes[column_id] == rows_indices[left_column_id]) {
+				if (max_row_indexes[column_id] == max_row_indexes[left_column_id]) {
 					int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
 					if (old_new_subtraction_id >= max_subtractions) {
 						// Block batch is full
@@ -267,7 +307,7 @@ public:
 		d_max_row_indexes.assign(in_columns, 0);
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
-		fill_column_sizes<<<1024, 256>>>(
+		fill_column_sizes<<<BLOCKS, 256>>>(
 			thrust::raw_pointer_cast(d_column_sizes.data()), 
 			d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
@@ -278,7 +318,7 @@ public:
 	}
 
 	void check_if_matrix_reduced(thrust::device_vector<int32_t>& rank_search_flags) {
-		check_if_matrix_reduced_raw<<<256, 256>>>( // TODO: fix grid size
+		check_if_matrix_reduced_raw<<<BLOCKS, 256>>>( // TODO: fix grid size
 			thrust::raw_pointer_cast(rank_search_flags.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size(),
@@ -290,7 +330,7 @@ public:
 	void find_subtraction_pairs(
 		thrust::device_vector<int32_t>& d_nnz_estimation,
 		thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
-		find_subtraction_pairs_raw<<<BLOCKS_FOR_PAIRS_SEARCH, 256>>>(
+		find_subtraction_pairs_raw<<<BLOCKS, 256>>>(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
@@ -304,7 +344,7 @@ public:
 	// TODO: add squash method to remove all garbage data in d_rows_indicies
 
 	void perform_subtraction(CSRMatrix& output, const thrust::device_vector<int32_t>& d_pairs_for_subtractions) const {
-		perform_subtractions<<<1024, 256>>>( // TODO: fix grid size
+		perform_subtractions<<<BLOCKS, 256>>>( // TODO: fix grid size
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
@@ -336,7 +376,7 @@ public:
 	}
 
 	void move_fixed_columns(CSRMatrix& output, thrust::device_vector<int32_t>& d_nnz_estimation) const {
-		move_fixed_columns_raw<<<1024, 256>>>( // TODO: fix grid size
+		move_fixed_columns_raw<<<BLOCKS, 256>>>( // TODO: fix grid size
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 
 			thrust::raw_pointer_cast(d_column_sizes.data()),
