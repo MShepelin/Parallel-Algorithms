@@ -2,7 +2,6 @@
 #include "device_launch_parameters.h"
 #include <iostream>
 #include "CUDA-By-Example/common/book.h"
-#include "CUDA-By-Example/common/cpu_bitmap.h"
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/transform_reduce.h>
@@ -19,6 +18,7 @@
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
 #define INVALID_VALUE -1
+#define CHECK_REDUCTION_DELAY 4
 
 #define cudaCheckError(msg) {  \
 	cudaError_t __err = cudaGetLastError();  \
@@ -140,7 +140,7 @@ __global__ void move_fixed_columns_raw(
 	}
 }
 
-__global__ void find_pivots(const int32_t* max_row_indexes, const int32_t* column_sizes, int32_t* max_row_to_pivot, const int32_t rows, const int32_t columns) {
+__global__ void find_pivots_raw(const int32_t* max_row_indexes, const int32_t* column_sizes, int32_t* max_row_to_pivot, const int32_t rows, const int32_t columns) {
 	__shared__ int32_t pivots[THREADS];
 	__shared__ int32_t nnz[THREADS];
 	pivots[threadIdx.x] = INVALID_VALUE;
@@ -163,7 +163,7 @@ __global__ void find_pivots(const int32_t* max_row_indexes, const int32_t* colum
 			int32_t best_pivot = INVALID_VALUE;
 			int32_t best_nnz = INVALID_VALUE;
 
-			for (size_t i = 0; i < THREADS; ++i) {
+			for (size_t i = 0; i < THREADS; ++i) { 
 				if (nnz[threadIdx.x] == INVALID_VALUE) {
 					continue;
 				}
@@ -179,7 +179,7 @@ __global__ void find_pivots(const int32_t* max_row_indexes, const int32_t* colum
 	}
 }
 
-__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, const int32_t* column_sizes, int32_t columns, const int32_t* columns_offset, const int32_t* rows_indices, const int32_t* max_row_indexes) {
+__global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* subtraction_pairs, const int32_t* column_sizes, int32_t columns, const int32_t* columns_offset, const int32_t* rows_indices, const int32_t* max_row_indexes, const int32_t* max_row_to_pivot) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	
 	// Each block has N threads
@@ -205,25 +205,25 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 		bool is_subtraction_found = false;
 
 		if (column_sizes[column_id] > 0) {
-			for (size_t left_column_id = 0; left_column_id < column_id; ++left_column_id) {
-				if (column_sizes[left_column_id] <= 0) {
-					continue;
-				}
-				if (max_row_indexes[column_id] == max_row_indexes[left_column_id]) {
-					int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
-					if (old_new_subtraction_id >= max_subtractions) {
-						// Block batch is full
-						break;
-					}
 
-					is_subtraction_found = true;
-					nnz_estimation[column_id] = column_sizes[column_id] + column_sizes[left_column_id] - 2;
-					subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
-					subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = left_column_id;
-					// subtraction pair means columns[column_id] -= columns[left_column_id]
-					break;
-				}
+			const int32_t max_row_index = max_row_indexes[column_id];
+			const int32_t pivot_column_id = max_row_to_pivot[max_row_index];
+
+			if (pivot_column_id == column_id) {
+				continue;
 			}
+
+			int32_t old_new_subtraction_id = atomicAdd(&new_subtraction_id, 1);
+			if (old_new_subtraction_id >= max_subtractions) {
+				// Block batch is full
+				break;
+			}
+
+			is_subtraction_found = true;
+			nnz_estimation[column_id] = column_sizes[column_id] + column_sizes[pivot_column_id] - 2;
+			subtraction_pairs[(offset + old_new_subtraction_id) * 2] = column_id;
+			subtraction_pairs[(offset + old_new_subtraction_id) * 2 + 1] = pivot_column_id;
+			// subtraction pair means columns[column_id] -= columns[pivot_column_id]
 		}
 
 		if (!is_subtraction_found) {
@@ -329,7 +329,8 @@ public:
 
 	void find_subtraction_pairs(
 		thrust::device_vector<int32_t>& d_nnz_estimation,
-		thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
+		thrust::device_vector<int32_t>& d_pairs_for_subtractions,
+		thrust::device_vector<int32_t>& max_row_to_pivot) {
 		find_subtraction_pairs_raw<<<BLOCKS, 256>>>(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
@@ -337,7 +338,8 @@ public:
 			d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
 			thrust::raw_pointer_cast(d_rows_indicies.data()),
-			thrust::raw_pointer_cast(d_max_row_indexes.data())
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+			thrust::raw_pointer_cast(max_row_to_pivot.data())
 		);
 	}
 
@@ -392,6 +394,16 @@ public:
 		);
 	}
 
+	void find_pivots(thrust::device_vector<int32_t>& max_row_to_pivot) {
+		find_pivots_raw<<<BLOCKS, 256>>>(
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			thrust::raw_pointer_cast(max_row_to_pivot.data()),
+			rows,
+			d_column_sizes.size()
+		);
+	}
+
 	int32_t find_rank() {
 		// If matrix is not fully reduced, the result may be incorrect
 		return thrust::transform_reduce(d_column_sizes.begin(), d_column_sizes.end(),
@@ -421,6 +433,7 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		CSRMatrix(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
+
 #ifdef DEBUG_PRINT
 	buffers[active_buffer_index].print();
 #endif
@@ -431,24 +444,21 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 
 	thrust::device_vector<int32_t> d_pairs_for_subtractions(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
 	thrust::device_vector<int32_t> d_nnz_estimation(columns, COLUMN_STAYS_FIXED);
-
+	thrust::device_vector<int32_t> d_max_row_to_pivot(rows, INVALID_VALUE);
 	cudaCheckError("Buffer initialisation");
 
-	// Do while not reduced:
 	for (int32_t attempt = 0; (attempt < max_attempts) && (rank_search_flags[0] == 0); ++attempt) {
-		// TODO: figure out a better way to check boolean
-		// TODO: define maimum attempts or take it from function arguements
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
-		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions);
+		d_max_row_to_pivot.assign(rows, INVALID_VALUE);
+		buffers[active_buffer_index].find_pivots(d_max_row_to_pivot);
+		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions, d_max_row_to_pivot);
 		
 #ifdef DEBUG_PRINT
 		printf("\n");
 #endif
-		// TODO: check that values (from) don't repeat in pairs value
-		// TODO: check that all columns are set in d_nnz_estimation
+		
 		buffers[1 - active_buffer_index].update_columns_offsets(d_nnz_estimation, buffers[active_buffer_index]);
 		// TODO: change function call to buffers[active_buffer_index].update_columns_offsets(d_nnz_estimation, buffers[1 - active_buffer_index]);
-		// perform subtraction with merge
 		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions);
 		buffers[active_buffer_index].move_fixed_columns(buffers[1 - active_buffer_index], d_nnz_estimation);
 
@@ -462,7 +472,6 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		std::cout << "Attempt " << attempt << ", rank " << buffers[active_buffer_index].find_rank() << "\n";
 		buffers[active_buffer_index].print();
 #endif
-		// [IMPORTANT] check that algorithm works when INVALID_VALUE can be found in rows_indicies (extra memory space) and column_size (empty columns)
 	}
 
 	return buffers[active_buffer_index].find_rank();
