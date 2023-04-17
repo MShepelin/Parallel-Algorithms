@@ -7,6 +7,7 @@
 #include <thrust/transform_reduce.h>
 #include <thrust/execution_policy.h>
 #include <stdint.h>
+#include <unordered_set>
 
 #define GRID_DIM 1000
 
@@ -140,13 +141,14 @@ __global__ void move_fixed_columns_raw(
 	}
 }
 
-__global__ void find_pivots_raw(const int32_t* max_row_indexes, const int32_t* column_sizes, int32_t* max_row_to_pivot, const int32_t rows, const int32_t columns) {
+__global__ void find_pivots_raw(const int32_t* max_row_indexes, const int32_t* column_sizes, int32_t* max_row_to_pivot, const int32_t* rows_indexes, const int32_t rows_compressed, const int32_t columns) {
 	__shared__ int32_t pivots[THREADS];
 	__shared__ int32_t nnz[THREADS];
 	pivots[threadIdx.x] = INVALID_VALUE;
 	nnz[threadIdx.x] = INVALID_VALUE;
 
-	for (int32_t max_row_index = blockIdx.x; max_row_index < rows; max_row_index += gridDim.x) {
+	for (int32_t compressed_row_id = blockIdx.x; compressed_row_id < rows_compressed; compressed_row_id += gridDim.x) {
+		const int32_t max_row_index = rows_indexes[compressed_row_id];
 		for (size_t column_id = threadIdx.x; column_id < columns; column_id += gridDim.x) {
 			if (max_row_indexes[column_id] != max_row_index) {
 				continue;
@@ -394,12 +396,13 @@ public:
 		);
 	}
 
-	void find_pivots(thrust::device_vector<int32_t>& max_row_to_pivot) {
+	void find_pivots(thrust::device_vector<int32_t>& d_max_row_to_pivot, const thrust::device_vector<int32_t>& d_rows_indexes) {
 		find_pivots_raw<<<BLOCKS, 256>>>(
 			thrust::raw_pointer_cast(d_max_row_indexes.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
-			thrust::raw_pointer_cast(max_row_to_pivot.data()),
-			rows,
+			thrust::raw_pointer_cast(d_max_row_to_pivot.data()),
+			thrust::raw_pointer_cast(d_rows_indexes.data()),
+			d_rows_indexes.size(),
 			d_column_sizes.size()
 		);
 	}
@@ -445,12 +448,17 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 	thrust::device_vector<int32_t> d_pairs_for_subtractions(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
 	thrust::device_vector<int32_t> d_nnz_estimation(columns, COLUMN_STAYS_FIXED);
 	thrust::device_vector<int32_t> d_max_row_to_pivot(rows, INVALID_VALUE);
+
+	std::unordered_set<int32_t> rows_indexes_set(rows_indicies, rows_indicies + nnz);
+	thrust::device_vector<int32_t> d_rows_indexes_compressed(rows_indexes_set.begin(), rows_indexes_set.end());
 	cudaCheckError("Buffer initialisation");
+
+	// TODO: initialise d_rows_indexes
 
 	for (int32_t attempt = 0; (attempt < max_attempts) && (rank_search_flags[0] == 0); ++attempt) {
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
 		d_max_row_to_pivot.assign(rows, INVALID_VALUE);
-		buffers[active_buffer_index].find_pivots(d_max_row_to_pivot);
+		buffers[active_buffer_index].find_pivots(d_max_row_to_pivot, d_rows_indexes_compressed);
 		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions, d_max_row_to_pivot);
 		
 #ifdef DEBUG_PRINT
