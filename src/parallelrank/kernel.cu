@@ -12,7 +12,8 @@
 
 #define BLOCKS 65535
 #define PAIRS_PER_ROUND BLOCKS * 1
-#define THREADS 512
+#define THREADS 1024
+#define REDUCE_STOP 8 // should be power of 2
 
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
@@ -177,12 +178,25 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 			}
 			__syncthreads();
 
+			uint32_t threads = THREADS;
+			while (threads > REDUCE_STOP) {
+				threads >>= 1;
+				if (threadIdx.x < threads) {
+					const int32_t column_compare_size = nnz[threadIdx.x + threads];
+					const int32_t comp_value = (column_compare_size < nnz[threadIdx.x]);
+
+					nnz[threadIdx.x] = (1 - comp_value) * nnz[threadIdx.x] + comp_value * column_compare_size;
+					pivots[threadIdx.x] = (1 - comp_value) * pivots[threadIdx.x] + comp_value * pivots[threadIdx.x + threads];
+				}
+				__syncthreads();
+			}
+
 			if (threadIdx.x == 0) {
-				int32_t best_pivot = INVALID_VALUE;
-				int32_t best_nnz = INT32_MAX;
+				int32_t best_pivot = pivots[0];
+				int32_t best_nnz = nnz[0];
 
 				// Find column with minimum number of nnz among threads results
-				for (size_t i = 0; i < THREADS; ++i) {
+				for (size_t i = 1; i < REDUCE_STOP; ++i) {
 					const int32_t comp_value = nnz[i] < best_nnz;
 					best_nnz = best_nnz * (1 - comp_value) + comp_value * nnz[i];
 					best_pivot = best_pivot * (1 - comp_value) + comp_value * pivots[i];
@@ -283,12 +297,12 @@ public:
 		rows = in_rows;
 	}
 
-	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t in_columns, const int32_t in_rows) {
+	CSRMatrix(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t in_columns, const int32_t in_rows, cudaStream_t stream) {
 		d_column_sizes.assign(in_columns, 0);
 		d_max_row_indexes.assign(in_columns, 0);
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
-		fill_column_sizes<<<BLOCKS, THREADS>>>(
+		fill_column_sizes<<<BLOCKS, THREADS, 0, stream>>>(
 			thrust::raw_pointer_cast(d_column_sizes.data()), 
 			d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
@@ -298,8 +312,8 @@ public:
 		rows = in_rows;
 	}
 
-	void check_if_matrix_reduced(thrust::device_vector<int32_t>& rank_search_flags) {
-		check_if_matrix_reduced_raw<<<BLOCKS, THREADS>>>(
+	void check_if_matrix_reduced(thrust::device_vector<int32_t>& rank_search_flags, cudaStream_t stream) {
+		check_if_matrix_reduced_raw<<<BLOCKS, THREADS, 0, stream>>>(
 			thrust::raw_pointer_cast(rank_search_flags.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size(),
@@ -311,8 +325,9 @@ public:
 
 	void find_subtraction_pairs(
 		thrust::device_vector<int32_t>& d_nnz_estimation,
-		thrust::device_vector<int32_t>& d_pairs_for_subtractions) {
-		find_subtraction_pairs_raw<<<BLOCKS, THREADS>>>(
+		thrust::device_vector<int32_t>& d_pairs_for_subtractions,
+		cudaStream_t stream) {
+		find_subtraction_pairs_raw<<<BLOCKS, THREADS, 0, stream>>>(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
@@ -325,8 +340,8 @@ public:
 
 	// TODO: add squash method to remove all garbage data in d_rows_indicies
 
-	void perform_subtraction(CSRMatrix& output, const thrust::device_vector<int32_t>& d_pairs_for_subtractions) const {
-		perform_subtractions<<<BLOCKS, 1>>>(
+	void perform_subtraction(CSRMatrix& output, const thrust::device_vector<int32_t>& d_pairs_for_subtractions, cudaStream_t stream) const {
+		perform_subtractions<<<BLOCKS, 1, 0, stream>>>(
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
@@ -355,8 +370,8 @@ public:
 		output.d_column_sizes.assign(output.d_column_sizes.size(), 0);
 	}
 
-	void move_fixed_columns(CSRMatrix& output, thrust::device_vector<int32_t>& d_nnz_estimation) const {
-		move_fixed_columns_raw<<<BLOCKS, THREADS>>>(
+	void move_fixed_columns(CSRMatrix& output, thrust::device_vector<int32_t>& d_nnz_estimation, cudaStream_t stream) const {
+		move_fixed_columns_raw<<<BLOCKS, THREADS, 0, stream>>>(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 
 			thrust::raw_pointer_cast(d_column_sizes.data()),
@@ -396,8 +411,12 @@ public:
 };
 
 extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t column_offsets_len, const int32_t* rows_indicies, const uint32_t nnz, const int32_t columns, const int32_t rows, const int32_t max_attempts) {
+	cudaStream_t stream1, stream2;
+	cudaStreamCreate(&stream1);
+	cudaStreamCreate(&stream2);
+	
 	CSRMatrix buffers[] = {
-		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows),
+		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows, stream1),
 		CSRMatrix(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
@@ -416,19 +435,21 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 
 	for (int32_t attempt = 0; (attempt < max_attempts) && (rank_search_flags[0] == 0); ++attempt) {
 		d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
-		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions);
+		buffers[active_buffer_index].find_subtraction_pairs(d_nnz_estimation, d_pairs_for_subtractions, stream1);
 		
 #ifdef DEBUG_PRINT
 		printf("\n");
 #endif
 		
 		buffers[active_buffer_index].update_columns_offsets(d_nnz_estimation, buffers[1 - active_buffer_index]);
-		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions);
-		buffers[active_buffer_index].move_fixed_columns(buffers[1 - active_buffer_index], d_nnz_estimation);
+		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions, stream1);
+		buffers[active_buffer_index].move_fixed_columns(buffers[1 - active_buffer_index], d_nnz_estimation, stream2);
+		cudaStreamSynchronize(stream1);
+		cudaStreamSynchronize(stream2);
 
 		active_buffer_index = 1 - active_buffer_index;
 		rank_search_flags[0] = 1;
-		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags);
+		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags, stream1);
 		cudaCheckError("Matrix reduction check");
 
 #ifdef DEBUG_PRINT
