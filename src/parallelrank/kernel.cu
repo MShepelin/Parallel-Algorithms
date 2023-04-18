@@ -39,6 +39,10 @@ struct is_positive : public thrust::unary_function<T, T>
 	}
 };
 
+__device__ __inline__ int32_t get_mask_from_bool(int32_t a) {
+	return ~(a - 1);
+}
+
 // TODO: change type in subtraction_pairs for uint32_t
 __global__ void perform_subtractions(
 	const int32_t* subtraction_pairs,
@@ -51,8 +55,8 @@ __global__ void perform_subtractions(
 	int32_t* output_max_row_indexes) {
 	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
 	for (int32_t pair_id = blockIdx.x * blockDim.x + threadIdx.x; pair_id < PAIRS_PER_ROUND; pair_id += gridDim.x * blockDim.x) {
-		int32_t column_from = subtraction_pairs[pair_id * 2];
-		int32_t column_subtraction = subtraction_pairs[pair_id * 2 + 1];
+		const int32_t column_from = subtraction_pairs[pair_id * 2];
+		const int32_t column_subtraction = subtraction_pairs[pair_id * 2 + 1];
 
 		if (column_from == INVALID_PAIR_VALUE || column_subtraction == INVALID_PAIR_VALUE) {
 			continue;
@@ -67,37 +71,35 @@ __global__ void perform_subtractions(
 		output_max_row_indexes[column_from] = 0;
 		output_column_sizes[column_from] = 0;
 		int32_t column_from_size = 0;
-		while (left_column_id < left_column_id_limit || right_column_id < right_column_id_limit) {
-			
-			int32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
-			int32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
 
+		int32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
+		int32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
+
+		while (left_low != INT32_MAX || right_low != INT32_MAX) {
 #ifdef DEBUG_PRINT
 			if (left_low == INVALID_VALUE || right_low == INVALID_VALUE) {
 				printf("Error occured\n");
 			}
 #endif
 
-			if (left_low == right_low) {
-				++left_column_id;
-				++right_column_id;
-				// 1 ^ 1 = 0
-			}
-			else if (left_low < right_low) {
-				output_rows_indicies[id_to_put] = left_low;
-				++column_from_size;
-				++id_to_put;
-				++left_column_id;
-				// 1 ^ 0 = 1
-			}
-			else if (right_low < left_low) {
-				output_rows_indicies[id_to_put] = right_low;
-				++column_from_size;
-				++id_to_put;
-				++right_column_id;
-				// 0 ^ 1 = 1
-			}
+			const int32_t left_eq_right = (left_low == right_low);
+			const int32_t left_diff_right = 1 - left_eq_right;
+			const int32_t left_lower_right = (left_low < right_low);
+
+			// See previous commits to understand this optimization
+			const int32_t left_diff_right_mask = get_mask_from_bool(left_diff_right);
+			const int32_t left_lower_right_mask = get_mask_from_bool(left_lower_right);
+
+			output_rows_indicies[id_to_put] = left_diff_right_mask & (left_low & left_lower_right_mask + right_low  * (~left_lower_right_mask));
+			column_from_size += left_diff_right;
+			id_to_put += left_diff_right;
+			left_column_id += (left_lower_right | left_eq_right);
+			right_column_id += ((1 - left_lower_right) | left_eq_right);
+
+			left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
+			right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
 		}
+
 		if (column_from_size > 0) {
 			output_column_sizes[column_from] = column_from_size;
 			output_max_row_indexes[column_from] = output_rows_indicies[id_to_put - 1];
@@ -172,9 +174,10 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 			for (size_t column_compare_id = threadIdx.x; column_compare_id < columns; column_compare_id += blockDim.x) {
 				const int32_t column_compare_size = column_sizes[column_compare_id];
 				const int32_t comp_value = (max_row_indexes[column_compare_id] == max_row_index && column_compare_size < nnz[threadIdx.x]);
+				const int32_t comp_value_mask = get_mask_from_bool(comp_value);
 
-				nnz[threadIdx.x] = (1 - comp_value) * nnz[threadIdx.x] + comp_value * column_compare_size;
-				pivots[threadIdx.x] = (1 - comp_value) * pivots[threadIdx.x] + comp_value * column_compare_id;
+				nnz[threadIdx.x] = ((~comp_value_mask) & nnz[threadIdx.x]) | (comp_value_mask & column_compare_size);
+				pivots[threadIdx.x] = ((~comp_value_mask) & pivots[threadIdx.x]) | (comp_value_mask & column_compare_id);
 			}
 			__syncthreads();
 
@@ -184,9 +187,10 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 				if (threadIdx.x < threads) {
 					const int32_t column_compare_size = nnz[threadIdx.x + threads];
 					const int32_t comp_value = (column_compare_size < nnz[threadIdx.x]);
+					const int32_t comp_value_mask = get_mask_from_bool(comp_value);
 
-					nnz[threadIdx.x] = (1 - comp_value) * nnz[threadIdx.x] + comp_value * column_compare_size;
-					pivots[threadIdx.x] = (1 - comp_value) * pivots[threadIdx.x] + comp_value * pivots[threadIdx.x + threads];
+					nnz[threadIdx.x] = ((~comp_value_mask) & nnz[threadIdx.x]) | (comp_value_mask & column_compare_size);
+					pivots[threadIdx.x] = ((~comp_value_mask) & pivots[threadIdx.x]) | (comp_value_mask & pivots[threadIdx.x + threads]);
 				}
 				__syncthreads();
 			}
@@ -198,19 +202,20 @@ __global__ void find_subtraction_pairs_raw(int32_t* nnz_estimation, int32_t* sub
 				// Find column with minimum number of nnz among threads results
 				for (size_t i = 1; i < REDUCE_STOP; ++i) {
 					const int32_t comp_value = nnz[i] < best_nnz;
-					best_nnz = best_nnz * (1 - comp_value) + comp_value * nnz[i];
-					best_pivot = best_pivot * (1 - comp_value) + comp_value * pivots[i];
+					const int32_t comp_value_mask = get_mask_from_bool(comp_value);
+					best_nnz = (best_nnz & (~comp_value_mask)) | (comp_value_mask & nnz[i]);
+					best_pivot = (best_pivot & (~comp_value_mask)) | (comp_value_mask & pivots[i]);
 				}
 
 				if (best_pivot != INVALID_VALUE && best_pivot != column_id && new_subtraction_id < max_subtractions) {
 					// new_subtraction_id is unique for each block and is accessed only by first thread
 
 					nnz_estimation[column_id] = column_size + best_nnz - 2;
-					subtraction_pairs[(offset + new_subtraction_id) * 2] = column_id;
-					subtraction_pairs[(offset + new_subtraction_id) * 2 + 1] = best_pivot;
+					subtraction_pairs[(offset + new_subtraction_id) << 1] = column_id;
+					subtraction_pairs[((offset + new_subtraction_id) << 1) + 1] = best_pivot;
 					// subtraction pair means columns[column_id] -= columns[best_pivot]
 
-					new_subtraction_id += 1;
+					++new_subtraction_id;
 				}
 				else {
 					// No atomic operations are needed because 
