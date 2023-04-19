@@ -11,7 +11,7 @@
 #define RANK_SEARCH_FLAGS_SIZE 1
 
 #define BLOCKS 65535
-#define PAIRS_PER_ROUND BLOCKS * 1
+#define PAIRS_PER_ROUND BLOCKS * 8
 #define THREADS 1024
 #define REDUCE_STOP 8 // should be power of 2
 
@@ -447,8 +447,10 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 #endif
 		
 		buffers[active_buffer_index].update_columns_offsets(d_nnz_estimation, buffers[1 - active_buffer_index]);
-		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions, stream1);
-		buffers[active_buffer_index].move_fixed_columns(buffers[1 - active_buffer_index], d_nnz_estimation, stream2);
+		cudaStreamSynchronize(stream1);
+		cudaStreamSynchronize(stream2);
+		buffers[active_buffer_index].perform_subtraction(buffers[1 - active_buffer_index], d_pairs_for_subtractions, stream2);
+		buffers[active_buffer_index].move_fixed_columns(buffers[1 - active_buffer_index], d_nnz_estimation, stream1);
 		cudaStreamSynchronize(stream1);
 		cudaStreamSynchronize(stream2);
 
