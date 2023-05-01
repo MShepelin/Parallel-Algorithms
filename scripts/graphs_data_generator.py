@@ -1,34 +1,67 @@
+from helpers import create_dir, get_sides, REPETITIONS, CONST_WIDTH, DATA_DIR
 from parallelrank import find_rank
-from scipy.sparse import load_npz
+from scipy.sparse import load_npz, rand
 from time import perf_counter
 from tqdm import tqdm
 import argparse
 import numpy as np
-import os
 
 
-# Try to create directory to store matrices
-def create_dir(dir_name):
-    try:
-        os.mkdir(dir_name)
-    except FileExistsError:
-        return
+def main():
+    # Parse arguements
+    parser = argparse.ArgumentParser(
+                prog='ParallelRankPerforamnceMeasurement',
+                description='This script measures performance on data generated from ParallelRankDataGenerator')
+    parser.add_argument('-t', '--test', action='store_true')
+    args = parser.parse_args()
+
+    # Data generation parametres
+    sides = get_sides(args.test)
+
+    read_dir = DATA_DIR
+    main_dir = "parallelrank_perfs"
+    create_dir(main_dir)
+    
+    # Warp up GPU
+    print("Warming up GPU on 500x500 matrix")
+    matrix = rand(500, 500)
+    for i in range(4):
+        find_rank(matrix)
+    
+    # Measure performance on generated data
+    print("Finding rank of matrices with different sides in directory \"{}\":".format(read_dir))
+    print("Saving results in \"{}\":".format(main_dir))
+    for side in sides:
+        # Generate matrix with changing and constant width
+        print("Finding rank for matrices with side", side)
+        for nnz, shape in tqdm([
+                (CONST_WIDTH * CONST_WIDTH, (CONST_WIDTH, side)), 
+                (1 * side, (side, side)), 
+                (10 * side, (side, side)), 
+                (CONST_WIDTH * CONST_WIDTH, (side, side))
+        ]):
+            width, height = shape
+            
+            total_time = 0
+            successful_repititions = 0
+            
+            # Use several repititions to get more precise results from average data
+            for i in range(REPETITIONS):
+                matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
+                
+                time_start = perf_counter()
+                find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0])
+                time_stop = perf_counter()
+                time_spent = time_stop - time_start
+                
+                total_time += time_spent
+                successful_repititions += 1
+                
+            np.save(
+                "{}/algorithm_time_{}x{}_nnz_{}.npy".format(main_dir, width, height, nnz), 
+                total_time / successful_repititions
+            )
 
 
-# 1) Warp up GPU
-# 2) Go through data and save results on each iteration
-
-# matrix = load_npz("data/side_50000/matrix_1.npz")
-# print(len(matrix.indptr), len(matrix.indices), flush=True)
-
-# length = 30000
-# matrix = matrix[:length, :length]
-
-# print(len(matrix.indptr), len(matrix.indices), flush=True)
-
-# time_start = perf_counter()
-# rank = find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0])
-# time_stop = perf_counter()
-
-# print("Rank computation time in seconds (HUGE matrix):", time_stop-time_start)
-# np.save("data/algorithm_time_v0.3_{}.npy".format(length), np.array([time_stop-time_start]))
+if __name__ == "__main__":
+    main()
