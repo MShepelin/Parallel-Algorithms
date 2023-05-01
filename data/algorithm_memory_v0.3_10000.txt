@@ -1,0 +1,312 @@
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 5207766
+row_inds size: 4973210
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 10126065
+row_inds size: 9085925
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 14012195
+row_inds size: 11153699
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 17447883
+row_inds size: 12191353
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 20340482
+row_inds size: 12689982
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22013029
+row_inds size: 12868639
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 12853431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 12720057
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 12510251
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 12267233
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 12007757
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 11735134
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 11467171
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 11211067
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 10950289
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 10704982
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 10461960
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 10220253
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 9992778
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 9771663
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 9556693
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 9349783
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 9150811
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8960507
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8776020
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8598881
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8433730
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8272318
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 8117722
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7971563
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7837631
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7707845
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7586998
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7474840
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7367279
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7269617
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7179268
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7096336
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 7022370
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6954651
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6896091
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6843457
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6798816
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6761580
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6731676
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6708929
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6692206
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6682424
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6677810
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676553
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431
+Memory consumption (int32_t's): c_off: 10001 c_sizes: 10000 max_rows: 10000 row_inds: 22569197
+row_inds size: 6676431

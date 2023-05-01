@@ -14,6 +14,7 @@
 #define PAIRS_PER_ROUND BLOCKS * 8
 #define THREADS 1024
 #define REDUCE_STOP 8 // should be power of 2
+#define SQUASHING_DELAY 1024
 
 #define INVALID_PAIR_VALUE -1
 #define COLUMN_STAYS_FIXED -1
@@ -71,35 +72,36 @@ __global__ void perform_subtractions(
 		output_max_row_indexes[column_from] = 0;
 		output_column_sizes[column_from] = 0;
 		int32_t column_from_size = 0;
+		while (left_column_id < left_column_id_limit || right_column_id < right_column_id_limit) {
+			int32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
+			int32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
 
-		int32_t left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
-		int32_t right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
-
-		while (left_low != INT32_MAX || right_low != INT32_MAX) {
 #ifdef DEBUG_PRINT
 			if (left_low == INVALID_VALUE || right_low == INVALID_VALUE) {
 				printf("Error occured\n");
 			}
 #endif
 
-			const int32_t left_eq_right = (left_low == right_low);
-			const int32_t left_diff_right = 1 - left_eq_right;
-			const int32_t left_lower_right = (left_low < right_low);
-
-			// See previous commits to understand this optimization
-			const int32_t left_diff_right_mask = get_mask_from_bool(left_diff_right);
-			const int32_t left_lower_right_mask = get_mask_from_bool(left_lower_right);
-
-			output_rows_indicies[id_to_put] = left_diff_right_mask & (left_low & left_lower_right_mask + right_low  * (~left_lower_right_mask));
-			column_from_size += left_diff_right;
-			id_to_put += left_diff_right;
-			left_column_id += (left_lower_right | left_eq_right);
-			right_column_id += ((1 - left_lower_right) | left_eq_right);
-
-			left_low = (left_column_id < left_column_id_limit) ? input_rows_indicies[left_column_id] : INT32_MAX;
-			right_low = (right_column_id < right_column_id_limit) ? input_rows_indicies[right_column_id] : INT32_MAX;
+			if (left_low == right_low) {
+				++left_column_id;
+				++right_column_id;
+				// 1 ^ 1 = 0
+			}
+			else if (left_low < right_low) {
+				output_rows_indicies[id_to_put] = left_low;
+				++column_from_size;
+				++id_to_put;
+				++left_column_id;
+				// 1 ^ 0 = 1
+			}
+			else if (right_low < left_low) {
+				output_rows_indicies[id_to_put] = right_low;
+				++column_from_size;
+				++id_to_put;
+				++right_column_id;
+				// 0 ^ 1 = 1
+			}
 		}
-
 		if (column_from_size > 0) {
 			output_column_sizes[column_from] = column_from_size;
 			output_max_row_indexes[column_from] = output_rows_indicies[id_to_put - 1];
@@ -119,7 +121,7 @@ __global__ void move_fixed_columns_raw(
 	int32_t* output_max_row_indexes,
 	uint32_t columns) {
 	for (int32_t column_id = blockIdx.x * blockDim.x + threadIdx.x; column_id < columns; column_id += gridDim.x * blockDim.x) {
-		if (nnz_estimation[column_id] != COLUMN_STAYS_FIXED) {
+		if (nnz_estimation != nullptr && nnz_estimation[column_id] != COLUMN_STAYS_FIXED) {
 			continue;
 		}
 
@@ -392,6 +394,49 @@ public:
 		);
 	}
 
+	void squash_memory(CSRMatrix& output, cudaStream_t stream) {
+		// Count nnz elements in csr
+		size_t total_elements_needed = thrust::reduce(
+			thrust::device, 
+			d_column_sizes.begin(), 
+			d_column_sizes.end(),
+			0
+		);
+		output.d_rows_indicies.resize(total_elements_needed);
+
+		// Find new column_offsets
+		thrust::host_vector<int32_t> column_sizes = d_column_sizes;
+		thrust::host_vector<int32_t> new_columns_offsets(output.d_column_sizes.size() + 1, (int32_t)0);
+
+		for (size_t i = 1; i < output.d_column_sizes.size() + 1; ++i) {
+			const int32_t estimation = column_sizes[i - 1];
+			new_columns_offsets[i] = new_columns_offsets[i - 1] + estimation;
+		}
+
+		output.d_columns_offsets = new_columns_offsets;
+		
+		// Move all columns together
+		move_fixed_columns_raw<<<BLOCKS, THREADS, 0, stream>>>(
+			nullptr,
+
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data()),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+
+			thrust::raw_pointer_cast(output.d_column_sizes.data()),
+			thrust::raw_pointer_cast(output.d_rows_indicies.data()),
+			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
+			thrust::raw_pointer_cast(output.d_max_row_indexes.data()),
+			d_column_sizes.size()
+		);
+
+		d_column_sizes = output.d_column_sizes;
+		d_rows_indicies = output.d_rows_indicies;
+		d_columns_offsets = output.d_columns_offsets;
+		d_max_row_indexes = output.d_max_row_indexes;
+	}
+
 	int32_t find_rank() {
 		// If matrix is not fully reduced, the result may be incorrect
 		return thrust::transform_reduce(d_column_sizes.begin(), d_column_sizes.end(),
@@ -412,6 +457,17 @@ public:
 			}
 			std::cout << "\n";
 		}
+	}
+
+	void log_memory_consumption() {
+		std::cout << "Memory consumption (int32_t's): " << \
+			"c_off: " << d_columns_offsets.capacity() << \
+			" c_sizes: " << d_column_sizes.capacity() << \
+			" max_rows: " << d_max_row_indexes.capacity() << \
+			" row_inds: " << d_rows_indicies.capacity();
+		std::cout << "\n";
+		std::cout << "row_inds size: " << d_rows_indicies.size();
+		std::cout << "\n";
 	}
 };
 
@@ -457,6 +513,12 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		active_buffer_index = 1 - active_buffer_index;
 		rank_search_flags[0] = 1;
 		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags, stream1);
+		if (attempt % SQUASHING_DELAY == (SQUASHING_DELAY - 1)) {
+			buffers[active_buffer_index].squash_memory(buffers[1 - active_buffer_index], stream1);
+			#ifdef LOG_MEMORY_CONSUMPTION
+				buffers[active_buffer_index].log_memory_consumption();
+			#endif
+		}
 		cudaCheckError("Matrix reduction check");
 
 #ifdef DEBUG_PRINT
@@ -465,6 +527,8 @@ extern "C" int32_t find_rank_raw(const int32_t* column_offsets, const uint32_t c
 		buffers[active_buffer_index].print();
 #endif
 	}
+
+	std::flush(std::cout);
 
 	return buffers[active_buffer_index].find_rank();
 }

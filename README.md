@@ -18,3 +18,6 @@ After you install our package you can test it on random matrices with different 
 pytest -v tests/test_rank_computation.py
 ```
 
+## Performance measurement
+
+Use "scripts" folder
