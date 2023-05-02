@@ -1,26 +1,24 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import ast
 import io
-import re
 import os
 import platform
 import pathlib
-import struct
 import shutil
 from setuptools import find_packages, setup, Extension
 from setuptools.command.build_ext import build_ext as build_ext_orig
 
+
 DEPENDENCIES = ['numpy']
 CURDIR = os.path.abspath(os.path.dirname(__file__))
+
 
 with io.open(os.path.join(os.path.dirname(CURDIR), "README.md"), "r", encoding="utf-8") as f:
     README = f.read()
 
+
 def read_text(file_name: str):
     return open(os.path.join("",file_name)).read()
-        
+
+  
 class build_ext(build_ext_orig):
 
     def run(self):
@@ -67,12 +65,13 @@ class build_ext(build_ext_orig):
 
             shutil.copy(dll_path, extdir.parent)
 
+
 setup(
     name="parallelrank",
-    version="0.1.0",
+    version="0.3.0",
     author="Dmitrii Shepelin",
     author_email="shepelin.d@yandex.ru",
-    description="Primitive library for parallel rank computation",
+    description="Library for binary matrix rank computation on GPU with CUDA",
     long_description=README,
     long_description_content_type = 'text/markdown',
     url="none",

@@ -24,9 +24,10 @@ def main():
     
     # Warp up GPU
     print("Warming up GPU on 500x500 matrix")
-    matrix = rand(500, 500)
-    for i in range(4):
-        find_rank(matrix)
+    matrix = rand(500, 500, density=1e-3, format='csr', dtype=np.int8)
+    matrix.data[:] = 1
+    for i in tqdm(range(4)):
+        find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0])
     
     # Measure performance on generated data
     print("Finding rank of matrices with different sides in directory \"{}\":".format(read_dir))

@@ -48,7 +48,7 @@ def main():
         ]):
             width, height = shape
 
-            create_dir("{}/shape_{}_{}".format(main_dir, width, height))
+            create_dir("{}/shape_{}x{}".format(main_dir, width, height))
             
             # Use several repetitions to get more precise results from average data
             for i in range(REPETITIONS):
