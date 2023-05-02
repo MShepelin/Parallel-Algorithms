@@ -280,6 +280,31 @@ __global__ void fill_column_sizes(int32_t* column_sizes, uint32_t columns, const
 	}
 }
 
+__global__ void update_columns_offsets_raw(
+	const int32_t* nnz_estimation,
+	const int32_t* input_column_sizes,
+	int32_t* output_columns_offsets,
+	uint32_t columns
+) {
+	// Assumes that this function is run with 1 block
+	for (size_t i = 1; i < columns + 1; ++i) {
+		const int32_t estimation = (nnz_estimation[i - 1] == COLUMN_STAYS_FIXED) ? input_column_sizes[i - 1] : nnz_estimation[i - 1];
+		output_columns_offsets[i] = output_columns_offsets[i - 1] + estimation;
+	}
+}
+
+__global__ void memory_squash_raw(
+	const int32_t* input_column_sizes,
+	int32_t* output_columns_offsets,
+	uint32_t columns
+) {
+	// Assumes that this function is run with 1 block
+	for (size_t i = 1; i < columns + 1; ++i) {
+		const int32_t estimation = input_column_sizes[i - 1];
+		output_columns_offsets[i] = output_columns_offsets[i - 1] + estimation;
+	}
+}
+
 struct CSRMatrix {
 private:
 	int32_t rows;
@@ -363,18 +388,18 @@ public:
 	}
 
 	void update_columns_offsets(thrust::device_vector<int32_t>& d_nnz_estimation, CSRMatrix& output) const {
-		thrust::host_vector<int32_t> nnz_estimation = d_nnz_estimation;
-		thrust::host_vector<int32_t> column_sizes = d_column_sizes;
-		thrust::host_vector<int32_t> new_columns_offsets(output.d_column_sizes.size() + 1, (int32_t)0);
+		uint32_t columns = d_column_sizes.size();
+		output.d_columns_offsets.assign(columns + 1, 0);
 
-		for (size_t i = 1; i < output.d_column_sizes.size() + 1; ++i) {
-			const int32_t estimation = (nnz_estimation[i - 1] == COLUMN_STAYS_FIXED) ? column_sizes[i - 1] : nnz_estimation[i - 1];
-			new_columns_offsets[i] = new_columns_offsets[i - 1] + estimation;
-		}
+		update_columns_offsets_raw<<<1, 1>>>(
+			thrust::raw_pointer_cast(d_nnz_estimation.data()),
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
+			columns
+		);
 
-		output.d_columns_offsets = new_columns_offsets;
-		output.d_rows_indicies.assign(new_columns_offsets[output.d_column_sizes.size()], INVALID_VALUE);
-		output.d_column_sizes.assign(output.d_column_sizes.size(), 0);
+		output.d_rows_indicies.assign(output.d_columns_offsets[columns], INVALID_VALUE);
+		output.d_column_sizes.assign(columns, 0);
 	}
 
 	void move_fixed_columns(CSRMatrix& output, thrust::device_vector<int32_t>& d_nnz_estimation, cudaStream_t stream) const {
@@ -405,15 +430,13 @@ public:
 		output.d_rows_indicies.resize(total_elements_needed);
 
 		// Find new column_offsets
-		thrust::host_vector<int32_t> column_sizes = d_column_sizes;
-		thrust::host_vector<int32_t> new_columns_offsets(output.d_column_sizes.size() + 1, (int32_t)0);
+		uint32_t columns = d_column_sizes.size();
 
-		for (size_t i = 1; i < output.d_column_sizes.size() + 1; ++i) {
-			const int32_t estimation = column_sizes[i - 1];
-			new_columns_offsets[i] = new_columns_offsets[i - 1] + estimation;
-		}
-
-		output.d_columns_offsets = new_columns_offsets;
+		memory_squash_raw<<<1, 1>>>(
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
+			columns
+		);
 		
 		// Move all columns together
 		move_fixed_columns_raw<<<BLOCKS, THREADS, 0, stream>>>(
