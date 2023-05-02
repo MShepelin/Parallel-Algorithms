@@ -6,8 +6,8 @@ cd ../
 echo ""
 
 echo "Generating matrices and measuring performance"
-python scripts/matrices_generator.py --test
-python scripts/graphs_data_generator.py --test
+python scripts/matrices_generator.py
+python scripts/graphs_data_generator.py
 echo ""
 
 echo "Creating archive with results and clearing results"
