@@ -39,8 +39,10 @@ python -m pytest -v tests/test_rank_computation.py
 This repository includes a simple script you can use to measure performance of this library. 
 
 1) Clone the project 
-2) Run "experiment.sh" in your shell. It will produce parallelrank_perfs.zip
-3) You can extract the archive in the repository folder and use "scripts/build_graphs.ipynb" to see results.
+2) Install numpy, scipy, tqdm, matplotlib, tensorflow with pip
+3) Install the package
+4) Run "experiment.sh" in your shell. It will produce parallelrank_perfs.zip
+5) You can extract the archive in the repository folder and use "scripts/build_graphs.ipynb" to see results.
 
 Remember that results may differ between systems and GPU models.
 

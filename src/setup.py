@@ -68,7 +68,7 @@ class build_ext(build_ext_orig):
 
 setup(
     name="parallelrank",
-    version="0.3.0",
+    version="0.4.0",
     author="Dmitrii Shepelin",
     author_email="shepelin.d@yandex.ru",
     description="Library for binary matrix rank computation on GPU with CUDA",

@@ -1,6 +1,7 @@
 from helpers import create_dir, get_sides, REPETITIONS, CONST_WIDTH, DATA_DIR
 from parallelrank import find_rank
 from scipy.sparse import load_npz, rand
+import tensorflow as tf
 from time import perf_counter
 from tqdm import tqdm
 import argparse
@@ -37,8 +38,8 @@ def main():
         print("Finding rank for matrices with side", side)
         for nnz, shape in tqdm([
                 (CONST_WIDTH * CONST_WIDTH, (CONST_WIDTH, side)), 
-                (1 * side, (side, side)), 
-                (10 * side, (side, side)), 
+                (0.1 * side, (side, side)), 
+                (0.01 * side, (side, side)), 
                 (CONST_WIDTH * CONST_WIDTH, (side, side))
         ]):
             width, height = shape
@@ -60,6 +61,52 @@ def main():
                 
             np.save(
                 "{}/algorithm_time_{}x{}_nnz_{}.npy".format(main_dir, width, height, nnz), 
+                total_time / successful_repititions
+            )
+            
+            if width * height > 10_000_000_000:
+                continue
+            
+            total_time = 0
+            successful_repititions = 0
+            
+            # Use several repititions to get more precise results from average data
+            for i in range(REPETITIONS):
+                matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
+                
+                time_start = perf_counter()
+                find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0], algorithm='gauss')
+                time_stop = perf_counter()
+                time_spent = time_stop - time_start
+                
+                total_time += time_spent
+                successful_repititions += 1
+                
+            np.save(
+                "{}/algorithm_time_{}x{}_nnz_{}_gauss.npy".format(main_dir, width, height, nnz), 
+                total_time / successful_repititions
+            )
+            
+            if width * height > 1_000_000_000:
+                continue
+            
+            total_time = 0
+            successful_repititions = 0
+            
+            # Use several repititions to get more precise results from average data
+            for i in range(REPETITIONS):
+                matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
+                
+                time_start = perf_counter()
+                tf.linalg.matrix_rank(matrix.todense(), tol=1e-5)
+                time_stop = perf_counter()
+                time_spent = time_stop - time_start
+                
+                total_time += time_spent
+                successful_repititions += 1
+                
+            np.save(
+                "{}/algorithm_time_{}x{}_nnz_{}_svd.npy".format(main_dir, width, height, nnz), 
                 total_time / successful_repititions
             )
 

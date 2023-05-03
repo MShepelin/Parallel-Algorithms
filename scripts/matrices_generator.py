@@ -42,8 +42,8 @@ def main():
         print("Generating matrices with side", side)
         for nnz, shape in tqdm([
                 (CONST_WIDTH * CONST_WIDTH, (CONST_WIDTH, side)), 
-                (1 * side, (side, side)), 
-                (10 * side, (side, side)), 
+                (0.1 * side, (side, side)), 
+                (0.01 * side, (side, side)), 
                 (CONST_WIDTH * CONST_WIDTH, (side, side))
         ]):
             width, height = shape

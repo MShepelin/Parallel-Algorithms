@@ -1,30 +1,21 @@
 from __future__ import print_function
-import numpy as np
-import scipy.sparse as sps
 import ctypes
-import math
-import sys
-import re
 import os
 
 '''
 Prints out the error message and quits the program.
 msg -- Custom error message to show the user
 '''
-def printHelpAndExit(msg):
+def print_help_exit(msg):
     error_msg = msg + '''
     How to use this:
-    parallelrank package:
+    ParallelRank package:
     User Functions:
-        run(matrix or file_name, thread_num[optional])
-                First Argument: Could be either of the following but not both
-                    matrix: Must be a 2-dimensional numpy array
-                    file_name: Must be of type string
-                Second Argument: Optional parameter
-                    thread_num: Number of threads for paralleling (positive integer)
-                    
+        find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, algorithm='hom')
     For more information, please see README.md.
     '''
+    
+    #TODO: add arguements explanation
 
     raise Exception(error_msg)
 
@@ -39,7 +30,7 @@ def find(name, path):#stackoverflow.com/questions/1724693/find-a-file-in-python
 def convert(prog, user_matrix): 
     num_rows, num_columns, num_entries, user_matrix = ravel_matrix(user_matrix)
     if user_matrix is None:
-        printHelpAndExit("Matrix was not created")
+        print_help_exit("Matrix was not created")
         return
 
     user_matrix = (ctypes.c_float * num_entries)(*user_matrix)
@@ -50,7 +41,7 @@ def convert(prog, user_matrix):
 
 def ravel_matrix(user_matrix):
     if len(user_matrix.shape)!=2:
-        printHelpAndExit("Matrix must be 2-dimensional")
+        print_help_exit("Matrix must be 2-dimensional")
         return
 
     num_rows, num_columns = user_matrix.shape

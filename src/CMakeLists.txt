@@ -11,14 +11,10 @@ endif()
 
 find_package(CUDA REQUIRED)
 
-#add_library(glut STATIC IMPORTED GLOBAL)
-#set_target_properties(glut PROPERTIES IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/parallelrank/glut64.lib")
-add_library(parallel_rank SHARED ./parallelrank/helpers.c ./parallelrank/kernel.cu)
-#target_link_libraries(parallel_rank glut)
+add_library(parallel_rank SHARED ./parallelrank/helpers.c ./parallelrank/kernel.cu ./parallelrank/gauss_algorithm.cpp)
 
 target_compile_options(parallel_rank PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
   --use_fast_math
-  #--relocatable-device-code=true
   -Xptxas 
   -O3
 >)
