@@ -3,6 +3,7 @@
 #include <vector>
 #include <stdint.h>
 #include <stdlib.h>
+#include <iostream>
 
 class GaussRank {
 private:
@@ -10,14 +11,14 @@ private:
     size_t columns_div_32;
     std::vector<bool> pivots;
 
-    uint32_t bool_xor(uint32_t a, uint32_t b) {
-        return a ^ b;
-    }
-
     void substract_collumn(std::vector<std::vector<uint32_t>>& matrix, size_t from, size_t which) {
         for (int i = 0; i < columns_div_32; ++i) {
-            matrix[from][i] = bool_xor(matrix[from][i], matrix[which][i]);
+            matrix[from][i] = matrix[from][i] ^ matrix[which][i];
         }
+    }
+
+    bool is_nnz(std::vector<std::vector<uint32_t>>& matrix, size_t row, size_t column) {
+        return matrix[row][column >> 5] & ((uint32_t)1 << (column % 32));
     }
 
 public:
@@ -29,10 +30,11 @@ public:
             size_t pivot = 0;
             bool found_pivot = false;
             for (size_t row_id = 0; row_id < rows; ++row_id) {
-                if ((
-                        matrix[row_id][column_id >> 5] & (1 << (column_id % 32))
-                    ) != 0 && !pivots[row_id]
-                ) {
+                if (pivots[row_id]) {
+                    continue;
+                }
+
+                if (is_nnz(matrix, row_id, column_id)) {
                     pivot = row_id;
                     found_pivot = true;
                     break;
@@ -47,7 +49,7 @@ public:
             pivots[pivot] = true;
             ++rank;
             for (size_t row_id = 0; row_id < rows; ++row_id) {
-                if (!pivots[row_id]) {
+                if (!pivots[row_id] && is_nnz(matrix, row_id, column_id)) {
                     substract_collumn(matrix, row_id, pivot);
                 }
             }
@@ -73,7 +75,7 @@ extern "C" int32_t find_rank_gauss(
 ) {
     size_t columns_div_32 = (columns + 31) >> 5;
     GaussRank calculator(rows, columns_div_32);
-    std::vector<std::vector<uint32_t>> matrix(rows, std::vector<uint32_t>(columns_div_32));
+    std::vector<std::vector<uint32_t>> matrix(rows, std::vector<uint32_t>(columns_div_32, 0));
 
     for (size_t column_offset = 1; column_offset < column_offsets_len; ++column_offset) {
         for (
@@ -83,7 +85,7 @@ extern "C" int32_t find_rank_gauss(
         ) {
             size_t row = rows_indicies[row_id];
             size_t column = column_offset - 1;
-            matrix[row][column >> 5] |= (1 << (column % 32));
+            matrix[row][column >> 5] |= ((uint32_t)1 << (column % 32));
         }
     }
 
