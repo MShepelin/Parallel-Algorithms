@@ -1,50 +1,31 @@
-﻿#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-#include <iostream>
+﻿#include <iostream>
 #include <stdint.h>
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
-#include <thrust/transform_reduce.h>
 #include <unordered_set>
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
+#include <atomic>
 
-#define RANK_SEARCH_FLAGS_SIZE 1
+#define CPU_PAIRS_PER_ROUND 1024
+#define CPU_SQUASHING_DELAY 1024
 
-#define BLOCKS 256 // 65535
-#define PAIRS_PER_ROUND BLOCKS * 8
-#define REDUCE_STOP 8 // should be power of 2
-#define SQUASHING_DELAY 1024
-#define THREADS 1024
+#define CPU_COLUMN_STAYS_FIXED -1
+#define CPU_INVALID_PAIR_VALUE -1
+#define CPU_INVALID_VALUE -1
 
-#define COLUMN_STAYS_FIXED -1
-#define INVALID_PAIR_VALUE -1
-#define INVALID_VALUE -1
-
-#define cudaCheckError(msg) {  \
-	cudaError_t __err = cudaGetLastError();  \
-	if(__err != cudaSuccess) {  \
-		fprintf(stderr, "Fatal error: %s (%s at %s:%d)\n", \
-					(msg), cudaGetErrorString(__err), \
-					__FILE__, __LINE__); \
-		fprintf(stderr, "*** FAILED - ABORTING\n"); \
-		exit(1); \
-	} \
-}
-
-template<typename T>
-struct is_positive : public thrust::unary_function<T, T>
-{
-	__host__ __device__ T operator()(const T& x) const {
-		return x > T(0) ? 1 : 0;
-	}
+struct ThreadInfo {
+	uint32_t thread_id;
+	uint32_t thread_num;
 };
 
-__device__ __inline__ int32_t get_mask_from_bool(int32_t a) {
+__inline__ int32_t get_mask_from_bool(int32_t a) {
 	return ~(a - 1);
 }
 
 // TODO: change type in subtraction_pairs for uint32_t
-__global__ void perform_subtractions(
+void cpu_perform_subtractions(
 	int32_t* subtraction_pairs,
 	const int32_t* input_columns_offsets,
 	const int32_t* input_column_sizes,
@@ -52,22 +33,23 @@ __global__ void perform_subtractions(
 	const int32_t* output_columns_offsets,
 	int32_t* output_column_sizes,
 	int32_t* output_rows_indicies,
-	int32_t* output_max_row_indexes
+	int32_t* output_max_row_indexes,
+	ThreadInfo t_info
 ) {
-	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
+	// Assumes subtraction_pairs has size (CPU_PAIRS_PER_ROUND * 2)
 	for (
-		int32_t pair_id = blockIdx.x * blockDim.x + threadIdx.x; 
-		pair_id < PAIRS_PER_ROUND; 
-		pair_id += gridDim.x * blockDim.x
+		int32_t pair_id = t_info.thread_id;
+		pair_id < CPU_PAIRS_PER_ROUND; 
+		pair_id += t_info.thread_num
 	) {
 		const int32_t column_from = subtraction_pairs[pair_id * 2];
 		const int32_t column_subtraction = subtraction_pairs[pair_id * 2 + 1];
 
-		if (column_from == INVALID_PAIR_VALUE || column_subtraction == INVALID_PAIR_VALUE) {
+		if (column_from == CPU_INVALID_PAIR_VALUE || column_subtraction == CPU_INVALID_PAIR_VALUE) {
 			continue;
 		}
 
-		subtraction_pairs[pair_id * 2] = subtraction_pairs[pair_id * 2 + 1] = INVALID_PAIR_VALUE;
+		subtraction_pairs[pair_id * 2] = subtraction_pairs[pair_id * 2 + 1] = CPU_INVALID_PAIR_VALUE;
 
 		uint32_t id_to_put = output_columns_offsets[column_from];
 		uint32_t left_column_id = input_columns_offsets[column_from];
@@ -89,7 +71,7 @@ __global__ void perform_subtractions(
 				input_rows_indicies[right_column_id] : INT32_MAX;
 
 			#ifdef DEBUG_PRINT
-			if (left_low == INVALID_VALUE || right_low == INVALID_VALUE) {
+			if (left_low == CPU_INVALID_VALUE || right_low == CPU_INVALID_VALUE) {
 				printf("Error occured\n");
 			}
 			#endif
@@ -122,7 +104,7 @@ __global__ void perform_subtractions(
 	}
 }
 
-__global__ void move_fixed_columns_raw(
+void cpu_move_fixed_columns_raw(
 	const int32_t* nnz_estimation,
 	const int32_t* input_column_sizes,
 	const int32_t* input_rows_indicies,
@@ -132,14 +114,15 @@ __global__ void move_fixed_columns_raw(
 	int32_t* output_rows_indicies,
 	const int32_t* output_columns_offsets,
 	int32_t* output_max_row_indexes,
-	uint32_t columns
+	uint32_t columns,
+	ThreadInfo t_info
 ) {
 	for (
-		int32_t column_id = blockIdx.x * blockDim.x + threadIdx.x; 
-		column_id < columns; 
-		column_id += gridDim.x * blockDim.x
+		int32_t column_id = t_info.thread_id;
+		column_id < columns;
+		column_id += t_info.thread_num
 	) {
-		if (nnz_estimation != nullptr && nnz_estimation[column_id] != COLUMN_STAYS_FIXED) {
+		if (nnz_estimation != nullptr && nnz_estimation[column_id] != CPU_COLUMN_STAYS_FIXED) {
 			continue;
 		}
 
@@ -162,122 +145,80 @@ __global__ void move_fixed_columns_raw(
 	}
 }
 
-__global__ void find_subtraction_pairs_raw(
+void cpu_find_subtraction_pairs_raw(
 	int32_t* nnz_estimation, 
 	int32_t* subtraction_pairs, 
 	const int32_t* column_sizes, 
 	int32_t columns, 
 	const int32_t* columns_offset, 
 	const int32_t* rows_indices, 
-	const int32_t* max_row_indexes
+	const int32_t* max_row_indexes,
+	ThreadInfo t_info
 ) {
-	// Assumes subtraction_pairs has size (PAIRS_PER_ROUND * 2)
-
-	// Assumes memory_calculation has size gridDim.x
-	__shared__ int32_t pivots[THREADS];
-	__shared__ int32_t nnz[THREADS];
-	
-	// These variables are used only by one thread per block
 	int32_t new_subtraction_id = 0;
-	uint32_t max_subtractions = PAIRS_PER_ROUND / gridDim.x;
-	uint32_t offset = blockIdx.x * max_subtractions;
+	uint32_t max_subtractions = CPU_PAIRS_PER_ROUND / t_info.thread_num;
+	uint32_t offset = t_info.thread_id * max_subtractions;
 
-	for (size_t column_id = blockIdx.x; column_id < columns; column_id += gridDim.x) {
+	for (size_t column_id = t_info.thread_id; column_id < columns; column_id += t_info.thread_num) {
 		const int32_t column_size = column_sizes[column_id];
 
 		if (column_size == 0) {
-			if (threadIdx.x == 0) {
-				nnz_estimation[column_id] = COLUMN_STAYS_FIXED;
-			}
+			nnz_estimation[column_id] = CPU_COLUMN_STAYS_FIXED;
 		}
 		else {
 			const int32_t max_row_index = max_row_indexes[column_id];
-			pivots[threadIdx.x] = INVALID_VALUE;
-			nnz[threadIdx.x] = INT32_MAX;
+			int32_t pivot = CPU_INVALID_VALUE;
+			int32_t nnz = INT32_MAX;
 
 			// Find column with minimum number of nnz for each thread
 			for (
-				size_t column_compare_id = threadIdx.x; 
-				column_compare_id < columns; 
-				column_compare_id += blockDim.x
+				size_t column_compare_id = 0;
+				column_compare_id < columns;
+				++column_compare_id
 			) {
 				// Here we find the best pivot by comparison
 				// Comparison is presented in boolean form (without if-statements)
 				const int32_t column_compare_size = column_sizes[column_compare_id];
 				const int32_t comp_value = (
-					max_row_indexes[column_compare_id] == max_row_index && 
-					column_compare_size < nnz[threadIdx.x]
+					max_row_indexes[column_compare_id] == max_row_index &&
+					column_compare_size < nnz
 				);
 				const int32_t comp_value_mask = get_mask_from_bool(comp_value);
 
-				nnz[threadIdx.x] = ((~comp_value_mask) & nnz[threadIdx.x]) | 
+				nnz = ((~comp_value_mask) & nnz) |
 					(comp_value_mask & column_compare_size);
-				pivots[threadIdx.x] = ((~comp_value_mask) & pivots[threadIdx.x]) | 
+				pivot = ((~comp_value_mask) & pivot) |
 					(comp_value_mask & column_compare_id);
 			}
-			__syncthreads();
 
-			uint32_t threads = THREADS;
-			while (threads > REDUCE_STOP) {
-				threads >>= 1;
-				if (threadIdx.x < threads) {
-					const int32_t column_compare_size = nnz[threadIdx.x + threads];
-					const int32_t comp_value = (column_compare_size < nnz[threadIdx.x]);
-					const int32_t comp_value_mask = get_mask_from_bool(comp_value);
+			if (pivot != CPU_INVALID_VALUE &&
+				pivot != column_id &&
+				new_subtraction_id < max_subtractions
+			) {
+				nnz_estimation[column_id] = column_size + nnz - 2;
+				subtraction_pairs[(offset + new_subtraction_id) << 1] = column_id;
+				subtraction_pairs[((offset + new_subtraction_id) << 1) + 1] = pivot;
+				// subtraction pair means columns[column_id] -= columns[best_pivot]
 
-					nnz[threadIdx.x] = ((~comp_value_mask) & nnz[threadIdx.x]) | 
-						(comp_value_mask & column_compare_size);
-					pivots[threadIdx.x] = ((~comp_value_mask) & pivots[threadIdx.x]) | 
-						(comp_value_mask & pivots[threadIdx.x + threads]);
-				}
-				__syncthreads();
+				++new_subtraction_id;
 			}
-
-			if (threadIdx.x == 0) {
-				int32_t best_pivot = pivots[0];
-				int32_t best_nnz = nnz[0];
-
-				// Find column with minimum number of nnz among threads results
-				for (size_t i = 1; i < REDUCE_STOP; ++i) {
-					const int32_t comp_value = nnz[i] < best_nnz;
-					const int32_t comp_value_mask = get_mask_from_bool(comp_value);
-					best_nnz = (best_nnz & (~comp_value_mask)) | (comp_value_mask & nnz[i]);
-					best_pivot = (best_pivot & (~comp_value_mask)) | (comp_value_mask & pivots[i]);
-				}
-
-				if (best_pivot != INVALID_VALUE && 
-					best_pivot != column_id && 
-					new_subtraction_id < max_subtractions
-				) {
-					// new_subtraction_id is unique for each block
-
-					nnz_estimation[column_id] = column_size + best_nnz - 2;
-					subtraction_pairs[(offset + new_subtraction_id) << 1] = column_id;
-					subtraction_pairs[((offset + new_subtraction_id) << 1) + 1] = best_pivot;
-					// subtraction pair means columns[column_id] -= columns[best_pivot]
-
-					++new_subtraction_id;
-				}
-				else {
-					// No atomic operations are needed because 
-					// each column_id is devoted to one block
-					nnz_estimation[column_id] = COLUMN_STAYS_FIXED;
-				}
+			else {
+				nnz_estimation[column_id] = CPU_COLUMN_STAYS_FIXED;
 			}
-			__syncthreads();
 		}
 	}
 }
 
-__global__ void check_if_matrix_reduced_raw(
-	int32_t* rank_search_flags,
+void cpu_check_if_matrix_reduced_raw(
+	std::atomic_int& is_reduced,
 	int32_t* column_sizes,
 	uint32_t columns,
 	const int32_t* column_offsets,
 	int32_t* max_row_indexes,
-	const int32_t* rows_indices
-) {	
-	for (size_t column_left = blockIdx.x; column_left < columns; column_left += gridDim.x) {
+	const int32_t* rows_indices,
+	ThreadInfo t_info
+) {
+	for (size_t column_left = t_info.thread_id; column_left < columns; column_left += t_info.thread_num) {
 		if (column_sizes[column_left] <= 0) {
 			continue;
 		}
@@ -285,29 +226,28 @@ __global__ void check_if_matrix_reduced_raw(
 		const int32_t left_max_row_index = max_row_indexes[column_left];
 
 		for (
-			size_t column_right = column_left + threadIdx.x + 1; 
+			size_t column_right = column_left + 1; 
 			column_right < columns; 
-			column_right += blockDim.x
+			++column_right
 		) {
 			if (left_max_row_index == max_row_indexes[column_right]) {
-				// column_sizes[column_right] is automatically > 0
-				// Matrix is not reduced
-				atomicAnd(&rank_search_flags[0], 0);
+				is_reduced = 0;
 			}
 		}
 	}
 }
 
-__global__ void fill_column_sizes(
+void cpu_fill_column_sizes(
 	int32_t* column_sizes, 
 	uint32_t columns, 
 	const int32_t* columns_offsets, 
 	int32_t* max_row_indexes, 
-	const int32_t* rows_indicies
+	const int32_t* rows_indicies,
+	ThreadInfo t_info
 ) {
 	// Assumes columns_offsets has size of (columns + 1)
 	// Assumes rows_indicies doesn't have fake values
-	for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < columns; i += gridDim.x * blockDim.x) {
+	for (uint32_t i = t_info.thread_id; i < columns; i += t_info.thread_num) {
 		const size_t next_column_offset = columns_offsets[i + 1];
 		const size_t column_size = next_column_offset - columns_offsets[i];
 		column_sizes[i] = column_size;
@@ -316,7 +256,7 @@ __global__ void fill_column_sizes(
 			max_row_indexes[i] = rows_indicies[next_column_offset - 1];
 		}
 		else {
-			max_row_indexes[i] = INVALID_VALUE;
+			max_row_indexes[i] = CPU_INVALID_VALUE;
 		}
 
 		#ifdef DEBUG_PRINT
@@ -329,21 +269,21 @@ __global__ void fill_column_sizes(
 	}
 }
 
-__global__ void update_columns_offsets_raw(
+void cpu_update_columns_offsets_raw(
 	const int32_t* nnz_estimation,
 	const int32_t* input_column_sizes,
 	int32_t* output_columns_offsets,
 	uint32_t columns
 ) {
 	// Assumes that this function is run with 1 block
-	for (size_t i = 1; i < columns + 1; ++i) {
-		const int32_t estimation = (nnz_estimation[i - 1] == COLUMN_STAYS_FIXED) ? 
+	for (uint32_t i = 1; i < columns + 1; ++i) {
+		const int32_t estimation = (nnz_estimation[i - 1] == CPU_COLUMN_STAYS_FIXED) ? 
 			input_column_sizes[i - 1] : nnz_estimation[i - 1];
 		output_columns_offsets[i] = output_columns_offsets[i - 1] + estimation;
 	}
 }
 
-__global__ void memory_squash_raw(
+void cpu_memory_squash_raw(
 	const int32_t* input_column_sizes,
 	int32_t* output_columns_offsets,
 	uint32_t columns
@@ -355,89 +295,90 @@ __global__ void memory_squash_raw(
 	}
 }
 
-struct CSRMatrix {
+struct CSRMatrixCPU {
 private:
 	int32_t rows;
-	thrust::device_vector<int32_t> d_columns_offsets;
-	thrust::device_vector<int32_t> d_rows_indicies;
+	thrust::host_vector<int32_t> d_columns_offsets;
+	thrust::host_vector<int32_t> d_rows_indicies;
 	// Number of real elements in column,
 	// is <= (difference in d_columns_offsets neighbour elements)
-	thrust::device_vector<int32_t> d_column_sizes; 
-	thrust::device_vector<int32_t> d_max_row_indexes;
+	thrust::host_vector<int32_t> d_column_sizes; 
+	thrust::host_vector<int32_t> d_max_row_indexes;
 
 public:
-	CSRMatrix() = delete;
+	CSRMatrixCPU() = delete;
 
-	CSRMatrix(const int32_t in_columns, const int32_t in_rows) {
+	CSRMatrixCPU(const int32_t in_columns, const int32_t in_rows) {
 		d_column_sizes.assign(in_columns, 0);
 		d_max_row_indexes.assign(in_columns, 0);
 		// We put invalid size values in d_columns_offsets
-		d_columns_offsets.assign(in_columns + 1, INVALID_VALUE);
+		d_columns_offsets.assign(in_columns + 1, CPU_INVALID_VALUE);
 		// d_rows_indicies stays empty
 		
 		// TODO: check that d_columns_offsets really has size (columns + 1)
 		rows = in_rows;
 	}
 
-	CSRMatrix(
+	CSRMatrixCPU(
 		const int32_t* column_offsets,
 		const uint32_t column_offsets_len,
 		const int32_t* rows_indicies,
 		const uint32_t nnz,
 		const int32_t in_columns,
-		const int32_t in_rows,
-		cudaStream_t stream
+		const int32_t in_rows
 	) {
 		d_column_sizes.assign(in_columns, 0);
 		d_max_row_indexes.assign(in_columns, 0);
 		d_columns_offsets.assign(column_offsets, column_offsets + column_offsets_len);
 		d_rows_indicies.assign(rows_indicies, rows_indicies + nnz);
-		fill_column_sizes<<<BLOCKS, THREADS, 0, stream>>>(
-			thrust::raw_pointer_cast(d_column_sizes.data()), 
-			d_column_sizes.size(),
-			thrust::raw_pointer_cast(d_columns_offsets.data()),
-			thrust::raw_pointer_cast(d_max_row_indexes.data()),
-			thrust::raw_pointer_cast(d_rows_indicies.data())
-		);
-		rows = in_rows;
-	}
 
-	void check_if_matrix_reduced(
-		thrust::device_vector<int32_t>& rank_search_flags, 
-		cudaStream_t stream
-	) {
-		check_if_matrix_reduced_raw<<<BLOCKS, THREADS, 0, stream>>>(
-			thrust::raw_pointer_cast(rank_search_flags.data()),
+		cpu_fill_column_sizes(
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
 			thrust::raw_pointer_cast(d_max_row_indexes.data()),
-			thrust::raw_pointer_cast(d_rows_indicies.data())
+			thrust::raw_pointer_cast(d_rows_indicies.data()),
+			{ 0, 1 }
+		);
+		
+		rows = in_rows;
+	}
+
+	void check_if_matrix_reduced(
+		std::atomic_int& is_reduced
+	) {
+		cpu_check_if_matrix_reduced_raw(
+			is_reduced,
+			thrust::raw_pointer_cast(d_column_sizes.data()),
+			d_column_sizes.size(),
+			thrust::raw_pointer_cast(d_columns_offsets.data()),
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+			thrust::raw_pointer_cast(d_rows_indicies.data()),
+			{ 0, 1 }
 		);
 	}
 
 	void find_subtraction_pairs(
-		thrust::device_vector<int32_t>& d_nnz_estimation,
-		thrust::device_vector<int32_t>& d_pairs_for_subtractions,
-		cudaStream_t stream
+		thrust::host_vector<int32_t>& d_nnz_estimation,
+		thrust::host_vector<int32_t>& d_pairs_for_subtractions
 	) {
-		find_subtraction_pairs_raw<<<BLOCKS, THREADS, 0, stream>>>(
+		cpu_find_subtraction_pairs_raw(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			d_column_sizes.size(),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
 			thrust::raw_pointer_cast(d_rows_indicies.data()),
-			thrust::raw_pointer_cast(d_max_row_indexes.data())
+			thrust::raw_pointer_cast(d_max_row_indexes.data()),
+			{ 0, 1 }
 		);
 	}
 
 	void perform_subtraction(
-		CSRMatrix& output, 
-		thrust::device_vector<int32_t>& d_pairs_for_subtractions, 
-		cudaStream_t stream
+		CSRMatrixCPU& output, 
+		thrust::host_vector<int32_t>& d_pairs_for_subtractions
 	) const {
-		perform_subtractions<<<BLOCKS, 1, 0, stream>>>(
+		cpu_perform_subtractions(
 			thrust::raw_pointer_cast(d_pairs_for_subtractions.data()),
 
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
@@ -447,70 +388,70 @@ public:
 			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
 			thrust::raw_pointer_cast(output.d_column_sizes.data()),
 			thrust::raw_pointer_cast(output.d_rows_indicies.data()),
-			thrust::raw_pointer_cast(output.d_max_row_indexes.data())
+			thrust::raw_pointer_cast(output.d_max_row_indexes.data()),
+
+			{ 0, 1 }
 		);
 	}
 
 	void update_columns_offsets(
-		thrust::device_vector<int32_t>& d_nnz_estimation, 
-		CSRMatrix& output
+		thrust::host_vector<int32_t>& d_nnz_estimation, 
+		CSRMatrixCPU& output
 	) const {
 		uint32_t columns = d_column_sizes.size();
 		output.d_columns_offsets.assign(columns + 1, 0);
 
-		update_columns_offsets_raw<<<1, 1>>>(
+		cpu_update_columns_offsets_raw(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
 			columns
 		);
 
-		output.d_rows_indicies.assign(output.d_columns_offsets[columns], INVALID_VALUE);
+		output.d_rows_indicies.assign(output.d_columns_offsets[columns], CPU_INVALID_VALUE);
 		output.d_column_sizes.assign(columns, 0);
 	}
 
 	void move_fixed_columns(
-		CSRMatrix& output, 
-		thrust::device_vector<int32_t>& d_nnz_estimation, 
-		cudaStream_t stream
+		CSRMatrixCPU& output, 
+		thrust::host_vector<int32_t>& d_nnz_estimation
 	) const {
-		move_fixed_columns_raw<<<BLOCKS, THREADS, 0, stream>>>(
+		cpu_move_fixed_columns_raw(
 			thrust::raw_pointer_cast(d_nnz_estimation.data()),
 
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			thrust::raw_pointer_cast(d_rows_indicies.data()),
 			thrust::raw_pointer_cast(d_columns_offsets.data()),
 			thrust::raw_pointer_cast(d_max_row_indexes.data()),
-			
+
 			thrust::raw_pointer_cast(output.d_column_sizes.data()),
 			thrust::raw_pointer_cast(output.d_rows_indicies.data()),
 			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
 			thrust::raw_pointer_cast(output.d_max_row_indexes.data()),
-			d_column_sizes.size()
+			d_column_sizes.size(),
+
+			{ 0, 1 }
 		);
 	}
 
-	void squash_memory(CSRMatrix& output, cudaStream_t stream) {
+	void squash_memory(CSRMatrixCPU& output) {
 		// Count nnz elements in csr
-		size_t total_elements_needed = thrust::reduce(
-			thrust::device, 
-			d_column_sizes.begin(), 
-			d_column_sizes.end(),
-			0
-		);
+		size_t total_elements_needed = 0;
+		for (size_t i = 0; i < d_column_sizes.size(); ++i) {
+			total_elements_needed += d_column_sizes[i];
+		}
 		output.d_rows_indicies.resize(total_elements_needed);
 
 		// Find new column_offsets
 		uint32_t columns = d_column_sizes.size();
 
-		memory_squash_raw<<<1, 1>>>(
+		cpu_memory_squash_raw(
 			thrust::raw_pointer_cast(d_column_sizes.data()),
 			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
 			columns
 		);
 		
-		// Move all columns together
-		move_fixed_columns_raw<<<BLOCKS, THREADS, 0, stream>>>(
+		cpu_move_fixed_columns_raw(
 			nullptr,
 
 			thrust::raw_pointer_cast(d_column_sizes.data()),
@@ -522,7 +463,9 @@ public:
 			thrust::raw_pointer_cast(output.d_rows_indicies.data()),
 			thrust::raw_pointer_cast(output.d_columns_offsets.data()),
 			thrust::raw_pointer_cast(output.d_max_row_indexes.data()),
-			d_column_sizes.size()
+			d_column_sizes.size(),
+
+			{ 0, 1 }
 		);
 
 		d_column_sizes = output.d_column_sizes;
@@ -533,16 +476,19 @@ public:
 
 	int32_t find_rank() {
 		// If matrix is not fully reduced, the result may be incorrect
-		return thrust::transform_reduce(d_column_sizes.begin(), d_column_sizes.end(),
-			is_positive<int32_t>(),
-			0,
-			thrust::plus<int32_t>());
+		int32_t rank = 0;
+		for (int i = 0; i < d_column_sizes.size(); ++i) {
+			if (d_column_sizes[i] > 0) {
+				++rank;
+			}
+		}
+		return rank;
 	}
 
 	void print() {
 		thrust::host_vector<int32_t> column_sizes = d_column_sizes;
 		thrust::host_vector<int32_t> rows_indicies = d_rows_indicies;
-		thrust::device_vector<int32_t> columns_offsets = d_columns_offsets;
+		thrust::host_vector<int32_t> columns_offsets = d_columns_offsets;
 
 		for (int32_t column_id = 0; column_id < column_sizes.size(); ++column_id) {
 			std::cout << "Column " << column_id;
@@ -577,7 +523,7 @@ public:
 	}
 };
 
-extern "C" int32_t find_rank_raw(
+extern "C" int32_t find_rank_cpu(
 	const int32_t* column_offsets, 
 	const uint32_t column_offsets_len, 
 	const int32_t* rows_indicies, 
@@ -586,13 +532,9 @@ extern "C" int32_t find_rank_raw(
 	const int32_t rows, 
 	const int32_t max_attempts
 ) {
-	cudaStream_t stream1, stream2;
-	cudaStreamCreate(&stream1);
-	cudaStreamCreate(&stream2);
-	
-	CSRMatrix buffers[] = {
-		CSRMatrix(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows, stream1),
-		CSRMatrix(columns, rows)
+	CSRMatrixCPU buffers[] = {
+		CSRMatrixCPU(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows),
+		CSRMatrixCPU(columns, rows)
 	};
 	uint32_t active_buffer_index = 0;
 
@@ -600,26 +542,29 @@ extern "C" int32_t find_rank_raw(
 	buffers[active_buffer_index].print();
 	#endif
 	
-	thrust::device_vector<int32_t> rank_search_flags(RANK_SEARCH_FLAGS_SIZE, 0);
+	std::atomic_int is_reduced;
+	is_reduced = 0;
 	// Structure of rank_search_flags:
 	// 0) is matrix reduced?
 
-	thrust::device_vector<int32_t> d_pairs_for_subtractions(
-		PAIRS_PER_ROUND * 2, 
-		INVALID_PAIR_VALUE
+	thrust::host_vector<int32_t> d_pairs_for_subtractions(
+		CPU_PAIRS_PER_ROUND * 2, 
+		CPU_INVALID_PAIR_VALUE
 	);
-	thrust::device_vector<int32_t> d_nnz_estimation(columns, COLUMN_STAYS_FIXED);
-	cudaCheckError("Buffer initialisation");
+	thrust::host_vector<int32_t> d_nnz_estimation(columns, CPU_COLUMN_STAYS_FIXED);
 
-	for (int32_t attempt = 0; (attempt < max_attempts) && (rank_search_flags[0] == 0); ++attempt) {
-		//d_pairs_for_subtractions.assign(PAIRS_PER_ROUND * 2, INVALID_PAIR_VALUE);
+	for (int32_t attempt = 0; (attempt < max_attempts) && (is_reduced == 0); ++attempt) {
+		//d_pairs_for_subtractions.assign(CPU_PAIRS_PER_ROUND * 2, CPU_INVALID_PAIR_VALUE);
 		buffers[active_buffer_index].find_subtraction_pairs(
-			d_nnz_estimation, 
-			d_pairs_for_subtractions, 
-			stream1
+			d_nnz_estimation,
+			d_pairs_for_subtractions
 		);
-		
+
 		#ifdef DEBUG_PRINT
+		printf("\npairs ");
+		for (const auto& el : d_pairs_for_subtractions) {
+			std::cout << el << " ";
+		}
 		printf("\n");
 		#endif
 		
@@ -627,31 +572,25 @@ extern "C" int32_t find_rank_raw(
 			d_nnz_estimation, 
 			buffers[1 - active_buffer_index]
 		);
-		cudaStreamSynchronize(stream1);
-		cudaStreamSynchronize(stream2);
+
 		buffers[active_buffer_index].perform_subtraction(
 			buffers[1 - active_buffer_index], 
-			d_pairs_for_subtractions, 
-			stream2
+			d_pairs_for_subtractions
 		);
 		buffers[active_buffer_index].move_fixed_columns(
 			buffers[1 - active_buffer_index], 
-			d_nnz_estimation, 
-			stream1
+			d_nnz_estimation
 		);
-		cudaStreamSynchronize(stream1);
-		cudaStreamSynchronize(stream2);
 
 		active_buffer_index = 1 - active_buffer_index;
-		rank_search_flags[0] = 1;
-		buffers[active_buffer_index].check_if_matrix_reduced(rank_search_flags, stream1);
-		if (attempt % SQUASHING_DELAY == (SQUASHING_DELAY - 1)) {
-			buffers[active_buffer_index].squash_memory(buffers[1 - active_buffer_index], stream1);
+		is_reduced = 1;
+		buffers[active_buffer_index].check_if_matrix_reduced(is_reduced);
+		if (attempt % CPU_SQUASHING_DELAY == (CPU_SQUASHING_DELAY - 1)) {
+			buffers[active_buffer_index].squash_memory(buffers[1 - active_buffer_index]);
 			#ifdef LOG_MEMORY_CONSUMPTION
 				buffers[active_buffer_index].log_memory_consumption();
 			#endif
 		}
-		cudaCheckError("Matrix reduction check");
 
 		#ifdef DEBUG_PRINT
 		std::flush(std::cout);
@@ -664,6 +603,6 @@ extern "C" int32_t find_rank_raw(
 	#ifdef DEBUG_PRINT
 	std::flush(std::cout);
 	#endif
-
+	
 	return buffers[active_buffer_index].find_rank();
 }

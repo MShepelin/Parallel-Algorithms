@@ -1,5 +1,5 @@
 import ctypes
-from .converter import print_help_exit # TODO: fix camel case
+from .converter import print_help_exit
 from .globals import PROG
 import numpy as np
 import platform
@@ -48,7 +48,7 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
     if len(column_offsets.shape) != 1 or len(rows_indicies.shape) != 1:
         print_help_exit("Error: column_offsets and rows_indicies should be 1D arrays")
         
-    if algorithm != 'hom' and algorithm != 'gauss':
+    if algorithm != 'hom' and algorithm != 'gauss' and algorithm != 'cpu':
         print_help_exit("Error: algorithm option can be \"hom\" or \"gauss\"")
         
     load_DLL()
@@ -76,4 +76,15 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
             len(rows_indicies), 
             columns, 
             rows
+        )
+    elif algorithm == 'cpu':
+        PROG.find_rank_cpu.restype = ctypes.c_int32
+        return PROG.find_rank_cpu(
+            c_column_offsets, 
+            len(column_offsets), 
+            c_rows_indicies, 
+            len(rows_indicies), 
+            columns, 
+            rows, 
+            max_attempts
         )

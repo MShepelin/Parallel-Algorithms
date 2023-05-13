@@ -11,7 +11,12 @@ endif()
 
 find_package(CUDA REQUIRED)
 
-add_library(parallel_rank SHARED ./parallelrank/helpers.c ./parallelrank/kernel.cu ./parallelrank/gauss_algorithm.cpp)
+add_library(parallel_rank SHARED 
+  ./parallelrank/helpers.c 
+  ./parallelrank/reduction_algorithm.cpp 
+  ./parallelrank/kernel.cu 
+  ./parallelrank/gauss_algorithm.cpp
+)
 
 target_compile_options(parallel_rank PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
   --use_fast_math
