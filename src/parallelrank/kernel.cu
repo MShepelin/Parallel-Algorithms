@@ -584,7 +584,8 @@ extern "C" int32_t find_rank_raw(
 	const uint32_t nnz, 
 	const int32_t columns, 
 	const int32_t rows, 
-	const int32_t max_attempts
+	const int32_t max_attempts,
+	int32_t* memory_consumption
 ) {
 	cudaStream_t stream1, stream2;
 	cudaStreamCreate(&stream1);
@@ -664,6 +665,11 @@ extern "C" int32_t find_rank_raw(
 	#ifdef DEBUG_PRINT
 	std::flush(std::cout);
 	#endif
+
+	*memory_consumption = 4 * (buffers[active_buffer_index].get_memory_consumption() + 
+		buffers[1 - active_buffer_index].get_memory_consumption() +
+		d_pairs_for_subtractions.capacity() +
+		d_nnz_estimation.capacity());
 
 	return buffers[active_buffer_index].find_rank();
 }

@@ -8,7 +8,7 @@
 #include <condition_variable>
 #include <atomic>
 
-#define CPU_PAIRS_PER_ROUND 1024
+#define CPU_PAIRS_PER_ROUND 256 * 8
 #define CPU_SQUASHING_DELAY 1024
 
 #define CPU_COLUMN_STAYS_FIXED -1
@@ -530,7 +530,8 @@ extern "C" int32_t find_rank_cpu(
 	const uint32_t nnz, 
 	const int32_t columns, 
 	const int32_t rows, 
-	const int32_t max_attempts
+	const int32_t max_attempts,
+	int32_t* memory_consumption
 ) {
 	CSRMatrixCPU buffers[] = {
 		CSRMatrixCPU(column_offsets, column_offsets_len, rows_indicies, nnz, columns, rows),
@@ -600,9 +601,10 @@ extern "C" int32_t find_rank_cpu(
 		#endif
 	}
 
-	#ifdef DEBUG_PRINT
-	std::flush(std::cout);
-	#endif
+	*memory_consumption = 4 * (buffers[active_buffer_index].get_memory_consumption() + 
+		buffers[1 - active_buffer_index].get_memory_consumption() +
+		d_pairs_for_subtractions.capacity() +
+		d_nnz_estimation.capacity());
 	
 	return buffers[active_buffer_index].find_rank();
 }

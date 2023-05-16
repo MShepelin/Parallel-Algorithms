@@ -14,10 +14,14 @@ def main():
                 prog='ParallelRankPerforamnceMeasurement',
                 description='This script measures performance on data generated from ParallelRankDataGenerator')
     parser.add_argument('-t', '--test', action='store_true')
+    parser.add_argument('-c', '--cpu', action='store_true')
+    parser.add_argument('-m', '--memory', action='store_true')
     args = parser.parse_args()
 
     # Data generation parametres
     sides = get_sides(args.test)
+    make_cpu = args.cpu
+    memory_mode = args.memory
 
     read_dir = DATA_DIR
     main_dir = "parallelrank_perfs"
@@ -52,17 +56,44 @@ def main():
                 matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
                 
                 time_start = perf_counter()
-                find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0])
+                rank, mem = find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0], log_memory=True)
                 time_stop = perf_counter()
                 time_spent = time_stop - time_start
                 
-                total_time += time_spent
+                if memory_mode:
+                    total_time += int(mem)
+                else:
+                    total_time += time_spent
                 successful_repititions += 1
                 
             np.save(
                 "{}/algorithm_time_{}x{}_nnz_{}.npy".format(main_dir, width, height, nnz), 
                 total_time / successful_repititions
             )
+            
+            if make_cpu:
+                total_time = 0
+                successful_repititions = 0
+
+                for i in range(REPETITIONS):
+                    matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
+                    
+                    time_start = perf_counter()
+                    rank, mem = find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0], algorithm='cpu', log_memory=True)
+                    time_stop = perf_counter()
+                    time_spent = time_stop - time_start
+                    
+                    if memory_mode:
+                        total_time += int(mem)
+                    else:
+                        total_time += time_spent
+                    successful_repititions += 1
+                    
+                np.save(
+                    "{}/algorithm_time_{}x{}_nnz_{}_cpu.npy".format(main_dir, width, height, nnz), 
+                    total_time / successful_repititions
+                )
+                
             
             if width * height > 10_000_000_000:
                 continue
@@ -75,11 +106,14 @@ def main():
                 matrix = load_npz("{}/shape_{}x{}/matrix_nnz_{}_iter_{}.npz".format(read_dir, width, height, nnz, i))
                 
                 time_start = perf_counter()
-                find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0], algorithm='gauss')
+                rank, mem = find_rank(matrix.indptr, matrix.indices, matrix.shape[1], matrix.shape[0], algorithm='gauss', log_memory=True)
                 time_stop = perf_counter()
                 time_spent = time_stop - time_start
                 
-                total_time += time_spent
+                if memory_mode:
+                    total_time += int(mem)
+                else:
+                    total_time += time_spent
                 successful_repititions += 1
                 
             np.save(
@@ -109,7 +143,6 @@ def main():
                 "{}/algorithm_time_{}x{}_nnz_{}_svd.npy".format(main_dir, width, height, nnz), 
                 total_time / successful_repititions
             )
-
 
 if __name__ == "__main__":
     main()

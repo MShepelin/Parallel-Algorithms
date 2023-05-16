@@ -8,7 +8,8 @@ extern int32_t find_rank_raw(
 	const uint32_t nnz, 
 	const int32_t columns, 
 	const int32_t rows, 
-	const int32_t max_attempts
+	const int32_t max_attempts,
+	int32_t* memory_consumption
 );
 
 int32_t find_rank(
@@ -18,7 +19,8 @@ int32_t find_rank(
 	const uint32_t nnz, 
 	const int32_t columns, 
 	const int32_t rows, 
-	const int32_t max_attempts
+	const int32_t max_attempts,
+	int32_t* memory_consumption
 ) {
 	find_rank_raw(
 		column_offsets, 
@@ -27,6 +29,7 @@ int32_t find_rank(
 		nnz, 
 		columns, 
 		rows, 
-		max_attempts
+		max_attempts,
+		memory_consumption
 	);
 }

@@ -3,6 +3,7 @@
 #include <vector>
 #include <stdint.h>
 #include <stdlib.h>
+#include <iostream>
 
 class GaussRank {
 private:
@@ -70,7 +71,8 @@ extern "C" int32_t find_rank_gauss(
 	const int32_t* rows_indicies, 
 	const uint32_t nnz, 
 	const int32_t columns, 
-	const int32_t rows
+	const int32_t rows,
+    int32_t* memory_consumption
 ) {
     size_t columns_div_32 = (columns + 31) >> 5;
     GaussRank calculator(rows, columns_div_32);
@@ -88,5 +90,6 @@ extern "C" int32_t find_rank_gauss(
         }
     }
 
+    *memory_consumption = matrix.capacity() * matrix[0].capacity() * 4 + columns / 8;
     return calculator.find_rank(matrix);
 }

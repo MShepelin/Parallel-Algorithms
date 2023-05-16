@@ -2,3 +2,4 @@
 .vscode/
 build/
 extra/
+parallelrank_data_*

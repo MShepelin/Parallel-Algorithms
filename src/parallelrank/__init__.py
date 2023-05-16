@@ -30,7 +30,7 @@ def load_DLL():
             raise Exception("Could not locate parallel_rank.so file, please check README.md for details.")
 
 
-def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, algorithm='hom'):
+def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, algorithm='hom', log_memory=False):
     if max_attempts is None:
         max_attempts = min(rows, columns)
     
@@ -56,35 +56,47 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
     c_column_offsets = (ctypes.c_int32 * len(column_offsets))(*column_offsets)
     c_rows_indicies = (ctypes.c_int32 * len(rows_indicies))(*rows_indicies)
     
+    memory_consumption_raw = ctypes.c_int32(0)
+    memory_consumption = ctypes.byref(memory_consumption_raw)
+    rank = 0
+    
     if algorithm == 'hom':
         PROG.find_rank.restype = ctypes.c_int32
-        return PROG.find_rank(
+        rank = PROG.find_rank(
             c_column_offsets, 
             len(column_offsets), 
             c_rows_indicies, 
             len(rows_indicies), 
             columns, 
             rows, 
-            max_attempts
+            max_attempts,
+            memory_consumption
         )
     elif algorithm == 'gauss':
         PROG.find_rank_gauss.restype = ctypes.c_int32
-        return PROG.find_rank_gauss(
+        rank = PROG.find_rank_gauss(
             c_column_offsets, 
             len(column_offsets), 
             c_rows_indicies, 
             len(rows_indicies), 
             columns, 
-            rows
+            rows,
+            memory_consumption
         )
     elif algorithm == 'cpu':
         PROG.find_rank_cpu.restype = ctypes.c_int32
-        return PROG.find_rank_cpu(
+        rank = PROG.find_rank_cpu(
             c_column_offsets, 
             len(column_offsets), 
             c_rows_indicies, 
             len(rows_indicies), 
             columns, 
             rows, 
-            max_attempts
+            max_attempts,
+            memory_consumption
         )
+        
+    if log_memory:
+        return rank, memory_consumption_raw.value
+    else:
+        return rank
