@@ -30,7 +30,7 @@ def load_DLL():
             raise Exception("Could not locate parallel_rank.so file, please check README.md for details.")
 
 
-def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, algorithm='hom', log_memory=False):
+def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, algorithm='mix', log_memory=False):
     if max_attempts is None:
         max_attempts = min(rows, columns)
     
@@ -48,9 +48,9 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
     if len(column_offsets.shape) != 1 or len(rows_indicies.shape) != 1:
         print_help_exit("Error: column_offsets and rows_indicies should be 1D arrays")
         
-    if algorithm != 'hom' and algorithm != 'gauss' and algorithm != 'cpu':
-        print_help_exit("Error: algorithm option can be \"hom\" or \"gauss\"")
-        
+    if algorithm != 'hom' and algorithm != 'gauss' and algorithm != 'cpu' and algorithm != 'mix':
+        print_help_exit("Error: valid algorithm options are: \"hom\",\"gauss\",\"cpu\",\"mix\"")
+    
     load_DLL()
 
     c_column_offsets = (ctypes.c_int32 * len(column_offsets))(*column_offsets)
@@ -59,6 +59,12 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
     memory_consumption_raw = ctypes.c_int32(0)
     memory_consumption = ctypes.byref(memory_consumption_raw)
     rank = 0
+    
+    if algorithm == 'mix':
+        if rows * columns >= 1_000_000:
+            algorithm = 'hom'
+        else:
+            algorithm = 'gpu'
     
     if algorithm == 'hom':
         PROG.find_rank.restype = ctypes.c_int32
