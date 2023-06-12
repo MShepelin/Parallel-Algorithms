@@ -64,7 +64,7 @@ def find_rank(column_offsets, rows_indicies, rows, columns, max_attempts=None, a
         if rows * columns >= 1_000_000:
             algorithm = 'hom'
         else:
-            algorithm = 'gpu'
+            algorithm = 'cpu'
     
     if algorithm == 'hom':
         PROG.find_rank.restype = ctypes.c_int32
